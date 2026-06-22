@@ -1,5 +1,5 @@
 # Al Brooks AI Study Tool (single-file Streamlit version)
-# 彻底修复保存问题
+# 支持在线加载和保存到GitHub
 
 import json
 import os
@@ -108,28 +108,35 @@ def save_json(data):
     return txt
 
 
-def save_to_github(data, owner, repo, path, token, commit_message=None):
+def save_to_github_direct(data, owner, repo, path, token, commit_message=None):
+    """
+    直接保存数据到GitHub
+    """
     if not token:
-        return False, "请提供GitHub Token"
+        return False, "❌ 请提供GitHub Token"
     
     if not commit_message:
         commit_message = f"更新数据 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     
     try:
+        # 准备API请求
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
         headers = {
             "Authorization": f"token {token}",
             "Accept": "application/vnd.github.v3+json"
         }
         
+        # 获取当前文件信息（获取SHA）
         response = requests.get(url, headers=headers)
         sha = None
         if response.status_code == 200:
             sha = response.json().get("sha")
         
+        # 准备要保存的内容
         content = json.dumps(data, ensure_ascii=False, indent=2)
         content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
         
+        # 构建payload
         payload = {
             "message": commit_message,
             "content": content_base64,
@@ -138,69 +145,17 @@ def save_to_github(data, owner, repo, path, token, commit_message=None):
         if sha:
             payload["sha"] = sha
         
+        # 发送PUT请求
         response = requests.put(url, headers=headers, json=payload)
+        
         if response.status_code in [200, 201]:
-            return True, "✅ 成功保存到GitHub"
+            return True, "✅ 成功保存到GitHub！"
         else:
-            return False, f"❌ 保存失败: {response.text}"
+            error_msg = response.json().get("message", "未知错误")
+            return False, f"❌ 保存失败: {error_msg}"
+            
     except Exception as e:
-        return False, f"❌ 保存失败: {e}"
-
-
-# --------------------- 核心数据操作函数 ---------------------
-
-def get_case_index_by_id(all_data, case_id):
-    """获取案例在列表中的索引"""
-    for i, case in enumerate(all_data.get("cases", [])):
-        if str(case.get("case_id", "")) == str(case_id):
-            return i
-    return -1
-
-
-def update_comment_in_all_data(all_data, case_id, bar_str, translation=None, plain=None):
-    """
-    直接在all_data中更新注释 - 使用索引直接修改
-    """
-    case_index = get_case_index_by_id(all_data, case_id)
-    if case_index == -1:
-        return False, "案例未找到"
-    
-    case = all_data["cases"][case_index]
-    
-    # 确保comments存在
-    if "comments" not in case:
-        case["comments"] = {}
-    
-    # 确保该K线的注释存在
-    if bar_str not in case["comments"]:
-        case["comments"][bar_str] = {}
-    
-    # 更新值
-    if translation is not None:
-        case["comments"][bar_str]["translation"] = translation
-    if plain is not None:
-        case["comments"][bar_str]["plain"] = plain
-    
-    return True, "更新成功"
-
-
-def get_comment_from_all_data(all_data, case_id, bar_str):
-    """从all_data中获取注释"""
-    case_index = get_case_index_by_id(all_data, case_id)
-    if case_index == -1:
-        return None
-    
-    case = all_data["cases"][case_index]
-    comments = case.get("comments", {})
-    return comments.get(bar_str, None)
-
-
-def get_current_case_data(all_data, case_id):
-    """获取当前案例的完整数据"""
-    case_index = get_case_index_by_id(all_data, case_id)
-    if case_index == -1:
-        return None
-    return all_data["cases"][case_index]
+        return False, f"❌ 保存失败: {str(e)}"
 
 
 # --------------------- UI 界面模块 ---------------------
@@ -365,17 +320,6 @@ st.markdown("""
         margin: 4px 0;
         font-size: 0.75rem;
     }
-    .debug-box {
-        background: #f8f9fa;
-        padding: 10px;
-        border-radius: 4px;
-        border: 1px solid #dee2e6;
-        margin: 10px 0;
-        font-family: monospace;
-        font-size: 0.7rem;
-        max-height: 300px;
-        overflow: auto;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -395,6 +339,8 @@ if "all_data_modified" not in st.session_state:
     st.session_state.all_data_modified = False
 if "save_message" not in st.session_state:
     st.session_state.save_message = ""
+if "json_url" not in st.session_state:
+    st.session_state.json_url = ""
 
 # ---------------- 侧边栏配置 ----------------
 with st.sidebar:
@@ -412,22 +358,12 @@ with st.sidebar:
     
     data_source = st.radio(
         "选择数据源",
-        ["上传文件", "在线URL"],
-        index=0 if st.session_state.data_source is None else (0 if st.session_state.data_source == "upload" else 1),
+        ["在线URL", "上传文件"],
+        index=0,
         label_visibility="collapsed"
     )
     
-    if data_source == "上传文件":
-        st.session_state.data_source = "upload"
-        file = st.file_uploader("📂 上传JSON", type=["json"], label_visibility="collapsed")
-        
-        if file:
-            all_data, all_cases = load_all_cases(file)
-            st.session_state.all_data = all_data
-            st.session_state.all_cases = all_cases
-            st.session_state.all_data_modified = False
-            st.success("✅ 数据加载成功")
-    else:
+    if data_source == "在线URL":
         st.session_state.data_source = "url"
         st.markdown("### 🔗 在线数据")
         
@@ -450,42 +386,42 @@ with st.sidebar:
                         st.session_state.all_data_modified = False
                         st.success("✅ 数据加载成功！")
                         st.rerun()
+    else:
+        st.session_state.data_source = "upload"
+        file = st.file_uploader("📂 上传JSON", type=["json"], label_visibility="collapsed")
+        
+        if file:
+            all_data, all_cases = load_all_cases(file)
+            st.session_state.all_data = all_data
+            st.session_state.all_cases = all_cases
+            st.session_state.all_data_modified = False
+            st.success("✅ 数据加载成功")
+    
+    st.markdown("---")
+    st.markdown("### 💾 GitHub保存配置")
+    
+    github_owner = st.text_input("仓库所有者", value=st.session_state.get("github_owner", ""))
+    github_repo = st.text_input("仓库名称", value=st.session_state.get("github_repo", ""))
+    github_path = st.text_input("文件路径", value=st.session_state.get("github_path", "cases_database.json"))
+    github_token = st.text_input(
+        "GitHub Token",
+        type="password",
+        value=st.session_state.get("github_token", ""),
+        help="需要repo权限的Personal Access Token"
+    )
+    
+    st.session_state.github_owner = github_owner
+    st.session_state.github_repo = github_repo
+    st.session_state.github_path = github_path
+    st.session_state.github_token = github_token
 
 # 使用session_state中的数据
 all_data = st.session_state.all_data
 all_cases = st.session_state.all_cases
 
 if all_data is None or all_cases is None or not all_cases:
-    st.info("👈 请上传JSON文件或输入在线URL加载数据")
+    st.info("👈 请加载数据")
     st.stop()
-
-# ---------------- GitHub保存配置 ----------------
-with st.sidebar:
-    st.markdown("---")
-    st.markdown("### 💾 保存设置")
-    
-    save_method = st.selectbox(
-        "保存方式",
-        ["下载到本地", "保存到GitHub"],
-        index=0
-    )
-    
-    if save_method == "保存到GitHub":
-        st.markdown("#### GitHub配置")
-        github_owner = st.text_input("仓库所有者", value=st.session_state.get("github_owner", ""))
-        github_repo = st.text_input("仓库名称", value=st.session_state.get("github_repo", ""))
-        github_path = st.text_input("文件路径", value=st.session_state.get("github_path", "cases_database.json"))
-        github_token = st.text_input(
-            "GitHub Token",
-            type="password",
-            value=st.session_state.get("github_token", ""),
-            help="需要repo权限的Personal Access Token"
-        )
-        
-        st.session_state.github_owner = github_owner
-        st.session_state.github_repo = github_repo
-        st.session_state.github_path = github_path
-        st.session_state.github_token = github_token
 
 # 获取所有案例的ID和标题
 case_options = {}
@@ -505,21 +441,12 @@ selected_case_id = st.sidebar.selectbox(
 # 更新当前案例ID
 st.session_state.current_case_id = selected_case_id
 
-# 加载选中的案例 - 直接从all_data获取最新数据
-case_index = -1
-for i, c in enumerate(all_data.get("cases", [])):
-    if str(c.get("case_id", "")) == str(selected_case_id):
-        case_index = i
-        break
+# 加载选中的案例
+case, bars_df, comments = load_case_by_id(all_cases, selected_case_id)
 
-if case_index == -1:
+if case is None:
     st.error(f"未找到案例 ID: {selected_case_id}")
     st.stop()
-
-# 获取当前案例数据
-current_case = all_data["cases"][case_index]
-bars_df = pd.DataFrame(current_case.get("bars", []))
-comments = current_case.get("comments", {})
 
 # 过滤编号0的空K线
 if 0 in bars_df["bar"].values:
@@ -566,7 +493,7 @@ if st.session_state.save_message:
     st.session_state.save_message = ""
 
 if st.session_state.all_data_modified:
-    st.markdown('<div class="save-status">⚠️ 数据已修改，请点击"📥 下载完整JSON"保存</div>', unsafe_allow_html=True)
+    st.markdown('<div class="save-status">⚠️ 数据已修改，请点击"🚀 保存到GitHub"保存</div>', unsafe_allow_html=True)
 
 # =======================
 # 顶部状态栏
@@ -615,10 +542,10 @@ status_html = f'''
     </span>
     <span class="status-item">
         <span class="label">📅</span>
-        <span class="value">{current_case.get('date', '')}</span>
+        <span class="value">{case.get('date', '')}</span>
     </span>
     <span class="status-item" style="flex:0;">
-        <span class="label">{current_case.get('title', '')}</span>
+        <span class="label">{case.get('title', '')}</span>
     </span>
     <span class="price-inline">
         {price_html}
@@ -840,51 +767,50 @@ if has_comment:
     st.markdown("---")
     st.markdown("#### 💾 保存操作")
     
-    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns([1, 1, 1, 1])
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
     
     with col_btn1:
-        if st.button("💾 保存修改", use_container_width=True, type="primary"):
+        if st.button("💾 保存到内存", use_container_width=True, type="primary"):
             # 从编辑框获取内容
             trans_edit = st.session_state.get(f"trans_edit_{bar_str}", "")
             plain_edit = st.session_state.get(f"plain_edit_{bar_str}", "")
             
-            # 直接更新all_data
-            success, msg = update_comment_in_all_data(
-                st.session_state.all_data,
-                selected_case_id,
-                bar_str,
-                translation=trans_edit,
-                plain=plain_edit
-            )
+            # 更新comments
+            if bar_str not in comments:
+                comments[bar_str] = {}
+            comments[bar_str]["translation"] = trans_edit
+            comments[bar_str]["plain"] = plain_edit
             
-            if success:
-                st.session_state.all_data_modified = True
-                st.session_state.save_message = f"✅ 修改已保存！翻译: {trans_edit[:30]}..."
-                st.rerun()
-            else:
-                st.error(f"❌ 保存失败: {msg}")
+            # 更新到all_data
+            for c in st.session_state.all_data["cases"]:
+                if str(c.get("case_id", "")) == str(selected_case_id):
+                    c["comments"] = comments
+                    break
+            
+            st.session_state.all_data_modified = True
+            st.session_state.save_message = f"✅ 已保存到内存！翻译: {trans_edit[:30] if trans_edit else '(空)'}"
+            st.rerun()
     
     with col_btn2:
         if st.button("🌐 AI翻译", use_container_width=True):
             if original_text:
                 with st.spinner("AI正在翻译..."):
                     result = ai_translate(original_text)
+                    # 更新comments
+                    if bar_str not in comments:
+                        comments[bar_str] = {}
+                    comments[bar_str]["translation"] = result
+                    
                     # 更新到all_data
-                    success, msg = update_comment_in_all_data(
-                        st.session_state.all_data,
-                        selected_case_id,
-                        bar_str,
-                        translation=result,
-                        plain=None
-                    )
-                    if success:
-                        st.session_state.all_data_modified = True
-                        st.session_state.save_message = f"✅ AI翻译完成: {result[:30]}..."
-                        # 更新编辑框的值
-                        st.session_state[f"trans_edit_{bar_str}"] = result
-                        st.rerun()
-                    else:
-                        st.error(f"❌ 保存失败: {msg}")
+                    for c in st.session_state.all_data["cases"]:
+                        if str(c.get("case_id", "")) == str(selected_case_id):
+                            c["comments"] = comments
+                            break
+                    
+                    st.session_state.all_data_modified = True
+                    st.session_state[f"trans_edit_{bar_str}"] = result
+                    st.session_state.save_message = f"✅ AI翻译完成: {result[:30]}..."
+                    st.rerun()
             else:
                 st.warning("没有原文可翻译")
     
@@ -893,31 +819,23 @@ if has_comment:
             if original_text:
                 with st.spinner("AI正在改写..."):
                     result = ai_plain(original_text)
+                    # 更新comments
+                    if bar_str not in comments:
+                        comments[bar_str] = {}
+                    comments[bar_str]["plain"] = result
+                    
                     # 更新到all_data
-                    success, msg = update_comment_in_all_data(
-                        st.session_state.all_data,
-                        selected_case_id,
-                        bar_str,
-                        translation=None,
-                        plain=result
-                    )
-                    if success:
-                        st.session_state.all_data_modified = True
-                        st.session_state.save_message = f"✅ AI白话完成: {result[:30]}..."
-                        # 更新编辑框的值
-                        st.session_state[f"plain_edit_{bar_str}"] = result
-                        st.rerun()
-                    else:
-                        st.error(f"❌ 保存失败: {msg}")
+                    for c in st.session_state.all_data["cases"]:
+                        if str(c.get("case_id", "")) == str(selected_case_id):
+                            c["comments"] = comments
+                            break
+                    
+                    st.session_state.all_data_modified = True
+                    st.session_state[f"plain_edit_{bar_str}"] = result
+                    st.session_state.save_message = f"✅ AI白话完成: {result[:30]}..."
+                    st.rerun()
             else:
                 st.warning("没有原文可改写")
-    
-    with col_btn4:
-        # 显示修改状态
-        if st.session_state.get("all_data_modified", False):
-            st.info("📝 有修改")
-        else:
-            st.info("✅ 已保存")
 
 else:
     current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
@@ -944,66 +862,69 @@ else:
         """, unsafe_allow_html=True)
 
 # =======================
-# 全局保存区域 - 在页面底部
+# 保存到GitHub - 在页面底部
 # =======================
 st.markdown("---")
-st.markdown("### 💾 下载数据")
+st.markdown("### 🚀 保存到GitHub")
 
-col_save1, col_save2 = st.columns([1, 1])
+# 显示当前数据预览
+with st.expander("📊 查看要保存的数据"):
+    st.json({
+        "case_id": selected_case_id,
+        "bar": bar_str,
+        "translation": comments.get(bar_str, {}).get("translation", ""),
+        "plain": comments.get(bar_str, {}).get("plain", "")
+    })
+
+col_save1, col_save2 = st.columns([2, 1])
 
 with col_save1:
-    # 下载完整JSON - 使用最新的数据
-    json_str = save_json(st.session_state.all_data)
-    
-    # 显示当前数据中是否有翻译内容
-    sample_check = "有" if comments.get(bar_str, {}).get("translation") else "无"
-    st.caption(f"当前Bar {bar_str} 翻译: {sample_check}")
-    
-    st.download_button(
-        "📥 下载完整JSON",
-        json_str,
-        file_name=f"albrooks_complete_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-        mime="application/json",
-        use_container_width=True,
-        help="下载所有案例数据（包含所有修改）",
-        key="download_complete"
-    )
+    if st.button("🚀 保存到GitHub", use_container_width=True, type="primary"):
+        if not st.session_state.github_token:
+            st.error("❌ 请提供GitHub Token")
+        elif not st.session_state.github_owner or not st.session_state.github_repo:
+            st.error("❌ 请提供GitHub仓库信息")
+        else:
+            with st.spinner("正在保存到GitHub..."):
+                success, message = save_to_github_direct(
+                    st.session_state.all_data,
+                    st.session_state.github_owner,
+                    st.session_state.github_repo,
+                    st.session_state.github_path,
+                    st.session_state.github_token,
+                    f"更新案例 {selected_case_id} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                if success:
+                    st.success(message)
+                    st.session_state.all_data_modified = False
+                    st.session_state.save_message = "✅ 成功保存到GitHub！"
+                    st.rerun()
+                else:
+                    st.error(message)
 
 with col_save2:
-    # 下载当前案例
-    current_case_data = get_current_case_data(st.session_state.all_data, selected_case_id)
-    
-    if current_case_data:
-        st.download_button(
-            "📥 下载当前案例",
-            json.dumps(current_case_data, ensure_ascii=False, indent=2),
-            file_name=f"case_{selected_case_id}_{datetime.now().strftime('%Y%m%d')}.json",
-            mime="application/json",
-            use_container_width=True,
-            help="仅下载当前案例（包含所有修改）",
-            key="download_case"
-        )
+    # 下载JSON作为备选
+    json_str = save_json(st.session_state.all_data)
+    st.download_button(
+        "📥 下载JSON备份",
+        json_str,
+        file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        mime="application/json",
+        use_container_width=True,
+        help="下载JSON备份（如果GitHub保存失败）"
+    )
 
-# =======================
-# 调试区域 - 显示当前数据
-# =======================
-with st.expander("🔍 调试 - 查看当前数据"):
-    st.markdown("### 当前K线注释数据")
-    current_comment = get_comment_from_all_data(st.session_state.all_data, selected_case_id, bar_str)
-    st.json({
-        "bar": bar_str,
-        "comments": current_comment,
-        "all_data_modified": st.session_state.all_data_modified,
-        "has_comment": has_comment
-    })
-    
-    st.markdown("### 当前案例所有注释")
-    st.json(comments)
-    
-    st.markdown("### 保存状态")
-    st.json({
-        "all_data_modified": st.session_state.all_data_modified,
-        "save_message": st.session_state.save_message,
-        "data_source": st.session_state.data_source,
-        "current_case_id": selected_case_id
-    })
+# 显示修改状态
+if st.session_state.all_data_modified:
+    st.info("💡 数据已修改，请点击 '🚀 保存到GitHub' 保存")
+else:
+    st.success("✅ 数据已保存")
+
+# 显示当前注释内容
+st.markdown("---")
+st.markdown("### 📝 当前K线注释")
+st.json({
+    "bar": bar_str,
+    "translation": comments.get(bar_str, {}).get("translation", ""),
+    "plain": comments.get(bar_str, {}).get("plain", "")
+})
