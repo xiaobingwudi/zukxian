@@ -142,12 +142,12 @@ def save_json(data):
 
 # --------------------- UI 界面模块 ---------------------
 
-# 极紧凑的CSS样式 - 优化界面布局，减少空白
+# CSS样式
 st.markdown("""
 <style>
-    /* 全局极紧凑 */
+    /* 全局紧凑 */
     .block-container {
-        padding-top: 0.1rem !important;
+        padding-top: 0.3rem !important;
         padding-bottom: 0.1rem !important;
         padding-left: 0.2rem !important;
         padding-right: 0.2rem !important;
@@ -270,11 +270,6 @@ st.markdown("""
         margin: 0.2rem 0 !important;
     }
 
-    /* 紧凑的列内边距 */
-    .css-1r6slb0 {
-        padding: 0 !important;
-    }
-
     /* 注释文本框全宽显示 */
     .comment-box {
         width: 100% !important;
@@ -325,6 +320,15 @@ st.markdown("""
         font-weight: 600;
         color: #495057;
         font-size: 0.65rem !important;
+    }
+    
+    /* 顶部状态栏样式 */
+    .top-status {
+        background: #f8f9fa;
+        padding: 4px 8px;
+        border-radius: 4px;
+        margin-bottom: 4px;
+        border: 1px solid #e9ecef;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -420,8 +424,9 @@ if first_positive_bar is not None and st.session_state.current_bar < first_posit
     st.session_state.current_bar = first_positive_bar
 
 # =======================
-# 顶部状态栏 - 显示当前K线信息
+# 顶部状态栏 - 显示当前K线信息（带背景，不会被覆盖）
 # =======================
+st.markdown('<div class="top-status">', unsafe_allow_html=True)
 top_cols = st.columns([0.6, 0.6, 0.6, 0.6, 4])
 
 with top_cols[0]:
@@ -439,6 +444,10 @@ with top_cols[3]:
 
 with top_cols[4]:
     st.caption(f"📅 {case.get('date', '')} | {case.get('title', '')}")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 添加一个小间距
+st.markdown("<br>", unsafe_allow_html=True)
 
 # =======================
 # K线图表绘制
@@ -611,9 +620,11 @@ with ctrl_cols[5]:
 # 下方信息面板 - 完整显示注释内容
 # =======================
 
+st.markdown("---")
+
 bar_str = str(st.session_state.current_bar)
 
-# 判断当前K线是否有注释 - 注意comments的key是字符串
+# 判断当前K线是否有注释
 has_comment = st.session_state.current_bar > 0 and bar_str in comments
 
 if has_comment:
@@ -624,13 +635,13 @@ if has_comment:
     plain_text = item.get("plain", "")
     
     # 显示Bar编号和原文
-    st.markdown(f"### Bar {bar_str}")
+    st.markdown(f"### 📊 Bar {bar_str} 注释内容")
     
     # 显示原文
     if original_text:
         st.markdown(f'<div class="original-text">📖 <b>原文:</b> {original_text}</div>', unsafe_allow_html=True)
     else:
-        st.info("此K线没有原文内容")
+        st.info("ℹ️ 此K线没有原文内容")
     
     # 显示已有的翻译（如果有）
     if translation:
@@ -787,7 +798,7 @@ else:
         row = current_row.iloc[0]
         
         # 显示Bar编号
-        st.markdown(f"##### Bar {bar_str}")
+        st.markdown(f"##### Bar {bar_str} 价格信息")
         
         # 价格信息 - 使用紧凑的HTML显示
         change = row['close'] - row['open']
