@@ -166,10 +166,10 @@ st.markdown("""
         background: none !important;
     }
     [data-testid="metric-container"] label {
-        font-size: 0.6rem !important;
+        font-size: 0.55rem !important;
     }
     [data-testid="metric-container"] div {
-        font-size: 0.8rem !important;
+        font-size: 0.75rem !important;
     }
 
     /* 紧凑的按钮 */
@@ -194,7 +194,7 @@ st.markdown("""
 
     /* 紧凑的列间距 */
     .row-widget.stColumns {
-        gap: 0.1rem !important;
+        gap: 0.05rem !important;
         margin: 0 !important;
     }
 
@@ -228,7 +228,7 @@ st.markdown("""
 
     /* 紧凑的caption */
     .caption, .stCaption {
-        font-size: 0.65rem !important;
+        font-size: 0.6rem !important;
         margin: 0 !important;
         padding: 0 !important;
     }
@@ -298,30 +298,6 @@ st.markdown("""
         white-space: pre-wrap !important;
     }
 
-    /* 紧凑的价格信息显示 */
-    .price-info {
-        font-size: 0.7rem !important;
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        padding: 2px 0;
-        margin: 0;
-        align-items: center;
-    }
-    .price-item {
-        background: #f8f9fa;
-        padding: 1px 6px;
-        border-radius: 3px;
-        border-left: 2px solid #dee2e6;
-        font-size: 0.7rem !important;
-        line-height: 1.4;
-    }
-    .price-item strong {
-        font-weight: 600;
-        color: #495057;
-        font-size: 0.65rem !important;
-    }
-    
     /* 顶部状态栏样式 */
     .top-status {
         background: #f8f9fa;
@@ -329,6 +305,28 @@ st.markdown("""
         border-radius: 4px;
         margin-bottom: 4px;
         border: 1px solid #e9ecef;
+    }
+    
+    /* 价格信息在状态栏中 */
+    .price-inline {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-items: center;
+        font-size: 0.65rem !important;
+    }
+    .price-inline-item {
+        background: white;
+        padding: 0px 5px;
+        border-radius: 2px;
+        border-left: 2px solid #dee2e6;
+        font-size: 0.65rem !important;
+        white-space: nowrap;
+    }
+    .price-inline-item strong {
+        font-weight: 600;
+        color: #495057;
+        font-size: 0.6rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -424,10 +422,31 @@ if first_positive_bar is not None and st.session_state.current_bar < first_posit
     st.session_state.current_bar = first_positive_bar
 
 # =======================
-# 顶部状态栏 - 显示当前K线信息（带背景，不会被覆盖）
+# 顶部状态栏 - 显示当前K线信息和价格
 # =======================
 st.markdown('<div class="top-status">', unsafe_allow_html=True)
-top_cols = st.columns([0.6, 0.6, 0.6, 0.6, 4])
+
+# 获取当前K线数据
+current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
+current_price_info = ""
+if not current_row.empty:
+    row = current_row.iloc[0]
+    change = row['close'] - row['open']
+    change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
+    is_up = row['close'] > row['open']
+    color_style = '#28a745' if is_up else '#dc3545'
+    current_price_info = f"""
+    <span class="price-inline-item"><strong>开盘</strong> {row['open']:.2f}</span>
+    <span class="price-inline-item"><strong>最高</strong> {row['high']:.2f}</span>
+    <span class="price-inline-item"><strong>最低</strong> {row['low']:.2f}</span>
+    <span class="price-inline-item"><strong>收盘</strong> {row['close']:.2f}</span>
+    <span class="price-inline-item" style="border-left-color: {color_style};">
+        <strong>涨跌</strong> {change:+.2f} ({change_pct:+.2f}%)
+    </span>
+    """
+
+# 使用更细的列来容纳更多信息
+top_cols = st.columns([0.4, 0.4, 0.4, 0.4, 4.5])
 
 with top_cols[0]:
     st.metric("Bar", st.session_state.current_bar)
@@ -443,7 +462,12 @@ with top_cols[3]:
     st.caption(f"ID: {selected_case_id}")
 
 with top_cols[4]:
-    st.caption(f"📅 {case.get('date', '')} | {case.get('title', '')}")
+    # 显示价格信息
+    if current_price_info:
+        st.markdown(f'<div class="price-inline">{current_price_info}</div>', unsafe_allow_html=True)
+    else:
+        st.caption("📊 无价格数据")
+
 st.markdown('</div>', unsafe_allow_html=True)
 
 # 添加一个小间距
@@ -790,31 +814,3 @@ if has_comment:
             use_container_width=True,
             help="下载更新后的JSON文件"
         )
-
-else:
-    # 无注释的K线 - 显示价格信息（紧凑显示）
-    current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
-    if not current_row.empty:
-        row = current_row.iloc[0]
-        
-        # 显示Bar编号
-        st.markdown(f"##### Bar {bar_str} 价格信息")
-        
-        # 价格信息 - 使用紧凑的HTML显示
-        change = row['close'] - row['open']
-        change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
-        is_up = row['close'] > row['open']
-        
-        st.markdown(f"""
-        <div class="price-info">
-            <span class="price-item"><strong>开盘</strong> {row['open']:.2f}</span>
-            <span class="price-item"><strong>最高</strong> {row['high']:.2f}</span>
-            <span class="price-item"><strong>最低</strong> {row['low']:.2f}</span>
-            <span class="price-item"><strong>收盘</strong> {row['close']:.2f}</span>
-            <span class="price-item" style="border-left-color: {'#28a745' if is_up else '#dc3545'};">
-                <strong>涨跌</strong> 
-                {change:+.2f} 
-                ({change_pct:+.2f}%)
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
