@@ -283,7 +283,7 @@ st.markdown("""
         word-wrap: break-word !important;
         white-space: pre-wrap !important;
     }
-
+    
     /* 原文显示区域 */
     .original-text {
         width: 100% !important;
@@ -602,14 +602,14 @@ if st.session_state.current_bar > 0 and bar_str in comments:
     # 显示已有的翻译（如果有）
     if translation:
         st.markdown(f'<div class="comment-box">📝 <b>翻译:</b> {translation}</div>', unsafe_allow_html=True)
-
+    
     # 显示已有的白话解释（如果有）
     if plain_text:
         st.markdown(f'<div class="comment-box">💬 <b>白话:</b> {plain_text}</div>', unsafe_allow_html=True)
 
     # AI功能按钮 - 一行显示
     ai_cols = st.columns([1, 1, 1, 0.5, 0.5])
-
+    
     with ai_cols[0]:
         if st.button("🤖 翻译", key="btn_t", use_container_width=True):
             with st.spinner("AI正在翻译..."):
@@ -622,14 +622,14 @@ if st.session_state.current_bar > 0 and bar_str in comments:
                         c["comments"] = comments
                         break
                 st.rerun()
-
+    
     with ai_cols[1]:
         if st.button("🤖 解释", key="btn_e", use_container_width=True):
             with st.spinner("AI正在解释..."):
                 result = ai_explain(original_text)
                 st.session_state[f"explain_{bar_str}"] = result
                 st.rerun()
-
+    
     with ai_cols[2]:
         if st.button("🤖 白话", key="btn_p", use_container_width=True):
             with st.spinner("AI正在改写..."):
@@ -642,7 +642,7 @@ if st.session_state.current_bar > 0 and bar_str in comments:
                         c["comments"] = comments
                         break
                 st.rerun()
-
+    
     with ai_cols[3]:
         if st.button("💾", key="save_btn", help="保存所有编辑", use_container_width=True):
             # 从编辑框中获取内容并保存
@@ -656,7 +656,7 @@ if st.session_state.current_bar > 0 and bar_str in comments:
                     break
             st.success("✅ 已保存")
             st.rerun()
-
+    
     with ai_cols[4]:
         st.download_button(
             "📥",
@@ -686,7 +686,7 @@ if st.session_state.current_bar > 0 and bar_str in comments:
     st.markdown("---")
     st.markdown("#### ✏️ 编辑注释")
     edit_row = st.columns([2, 2])
-
+    
     # 获取当前编辑框的值，优先使用session_state
     trans_current = st.session_state.get(f"trans_edit_{bar_str}", comments[bar_str].get("translation", ""))
     plain_current = st.session_state.get(f"plain_edit_{bar_str}", comments[bar_str].get("plain", ""))
@@ -725,7 +725,7 @@ if st.session_state.current_bar > 0 and bar_str in comments:
                     break
             st.success("✅ 已保存")
             st.rerun()
-
+    
     with col_download:
         st.download_button(
             "📥 下载JSON",
@@ -741,13 +741,13 @@ else:
     current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
     if not current_row.empty:
         row = current_row.iloc[0]
-
+        
         # 显示Bar编号
         st.markdown(f"### Bar {bar_str}")
-
+        
         # 价格信息 - 一行显示
         info_row = st.columns([1, 1, 1, 1, 1.5])
-
+        
         with info_row[0]:
             st.metric("开盘", f"{row['open']:.2f}")
         with info_row[1]:
@@ -760,5 +760,5 @@ else:
             change = row['close'] - row['open']
             change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
             st.metric("涨跌", f"{change:+.2f} ({change_pct:+.2f}%)")
-
+        
         st.info("💡 此K线暂无注释")
