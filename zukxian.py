@@ -1,5 +1,5 @@
 # Al Brooks AI Study Tool (single-file Streamlit version)
-# 支持GitHub Token持久化存储
+# 使用Streamlit Secrets管理所有配置
 
 import json
 import os
@@ -16,10 +16,50 @@ import base64
 st.set_page_config(page_title="Al Brooks AI Study Tool", layout="wide")
 
 
+# --------------------- 配置管理模块 ---------------------
+
+def get_secret(key, default=None):
+    """
+    从Streamlit Secrets获取配置
+    优先从secrets读取，如果没有则从session_state读取
+    """
+    try:
+        # 尝试从secrets读取
+        value = st.secrets.get(key)
+        if value is not None:
+            return value
+    except:
+        pass
+    
+    # 如果secrets没有，从session_state读取
+    return st.session_state.get(key, default)
+
+
+def get_github_config():
+    """获取GitHub配置"""
+    return {
+        "owner": get_secret("GITHUB_OWNER", ""),
+        "repo": get_secret("GITHUB_REPO", ""),
+        "path": get_secret("GITHUB_PATH", "cases_database.json"),
+        "token": get_secret("GITHUB_TOKEN", ""),
+        "branch": get_secret("GITHUB_BRANCH", "main")
+    }
+
+
+def get_api_key():
+    """获取DeepSeek API Key"""
+    return get_secret("DEEPSEEK_API_KEY", "")
+
+
+def get_json_url():
+    """获取默认JSON URL"""
+    return get_secret("JSON_URL", "")
+
+
 # --------------------- AI 功能模块 ---------------------
 
 def get_client():
-    api_key = st.session_state.get("api_key", "")
+    api_key = get_api_key()
     if not api_key:
         return None
     return OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
@@ -28,7 +68,7 @@ def get_client():
 def ask_ai(system_prompt, user_prompt):
     client = get_client()
     if not client:
-        return "请先填写 DeepSeek API Key"
+        return "请配置 DeepSeek API Key（在Secrets中设置DEEPSEEK_API_KEY）"
 
     try:
         resp = client.chat.completions.create(
@@ -208,70 +248,6 @@ def save_json(data):
     return txt
 
 
-# --------------------- 配置管理模块 ---------------------
-
-def save_config_to_session(config_key, value):
-    """保存配置到session_state"""
-    st.session_state[config_key] = value
-
-
-def get_config_from_session(config_key, default=None):
-    """从session_state读取配置"""
-    return st.session_state.get(config_key, default)
-
-
-def save_github_config(owner, repo, path, token, branch):
-    """保存GitHub配置"""
-    st.session_state.github_owner = owner
-    st.session_state.github_repo = repo
-    st.session_state.github_path = path
-    st.session_state.github_token = token
-    st.session_state.github_branch = branch
-
-
-def load_github_config():
-    """加载GitHub配置"""
-    return {
-        "owner": st.session_state.get("github_owner", ""),
-        "repo": st.session_state.get("github_repo", ""),
-        "path": st.session_state.get("github_path", "cases_database.json"),
-        "token": st.session_state.get("github_token", ""),
-        "branch": st.session_state.get("github_branch", "main")
-    }
-
-
-def save_config_to_file():
-    """将配置保存到本地文件（仅在本地运行有效）"""
-    try:
-        config = {
-            "github_owner": st.session_state.get("github_owner", ""),
-            "github_repo": st.session_state.get("github_repo", ""),
-            "github_path": st.session_state.get("github_path", "cases_database.json"),
-            "github_branch": st.session_state.get("github_branch", "main"),
-            "api_key": st.session_state.get("api_key", ""),
-            "json_url": st.session_state.get("json_url", "")
-        }
-        with open(".config.json", "w") as f:
-            json.dump(config, f)
-        return True
-    except:
-        return False
-
-
-def load_config_from_file():
-    """从本地文件加载配置（仅在本地运行有效）"""
-    try:
-        if os.path.exists(".config.json"):
-            with open(".config.json", "r") as f:
-                config = json.load(f)
-                for key, value in config.items():
-                    st.session_state[key] = value
-            return True
-    except:
-        pass
-    return False
-
-
 # --------------------- UI 界面模块 ---------------------
 
 # CSS样式
@@ -434,12 +410,13 @@ st.markdown("""
         margin: 4px 0;
         font-size: 0.75rem;
     }
-    .config-box {
+    .config-status {
         background: #e8f4fd;
-        padding: 10px;
+        padding: 8px 12px;
         border-radius: 4px;
         border: 1px solid #b8d4e8;
-        margin: 10px 0;
+        margin: 8px 0;
+        font-size: 0.8rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -463,209 +440,136 @@ if "save_message" not in st.session_state:
 if "github_file_sha" not in st.session_state:
     st.session_state.github_file_sha = None
 
-# 尝试从文件加载配置（仅本地有效）
-load_config_from_file()
-
-# ---------------- 侧边栏配置 ----------------
+# ---------------- 显示配置状态 ----------------
 with st.sidebar:
-    st.markdown("### ⚙️ 配置")
-    st.session_state["api_key"] = st.text_input(
-        "API Key",
-        type="password",
-        value=st.session_state.get("api_key", ""),
-        placeholder="输入API Key",
-        label_visibility="collapsed",
-        key="api_key_input"
-    )
+    st.markdown("### 🔐 配置状态")
     
-    st.markdown("---")
-    st.markdown("### 🔑 GitHub配置")
-    st.markdown('<div class="config-box">', unsafe_allow_html=True)
-    
-    # GitHub配置输入
-    github_owner = st.text_input(
-        "仓库所有者",
-        value=st.session_state.get("github_owner", ""),
-        placeholder="你的GitHub用户名",
-        key="github_owner_input"
-    )
-    
-    github_repo = st.text_input(
-        "仓库名称",
-        value=st.session_state.get("github_repo", ""),
-        placeholder="仓库名称",
-        key="github_repo_input"
-    )
-    
-    github_path = st.text_input(
-        "文件路径",
-        value=st.session_state.get("github_path", "cases_database.json"),
-        placeholder="文件路径",
-        key="github_path_input"
-    )
-    
-    github_branch = st.text_input(
-        "分支",
-        value=st.session_state.get("github_branch", "main"),
-        placeholder="分支名称",
-        key="github_branch_input"
-    )
-    
-    github_token = st.text_input(
-        "GitHub Token",
-        type="password",
-        value=st.session_state.get("github_token", ""),
-        placeholder="输入GitHub Token",
-        help="需要repo权限的Personal Access Token",
-        key="github_token_input"
-    )
-    
-    # 保存配置按钮
-    col_config1, col_config2 = st.columns(2)
-    with col_config1:
-        if st.button("💾 保存配置", use_container_width=True):
-            # 保存到session_state
-            st.session_state.github_owner = github_owner
-            st.session_state.github_repo = github_repo
-            st.session_state.github_path = github_path
-            st.session_state.github_branch = github_branch
-            st.session_state.github_token = github_token
-            st.session_state.api_key = st.session_state.get("api_key_input", "")
-            
-            # 尝试保存到文件（本地）
-            if save_config_to_file():
-                st.success("✅ 配置已保存到本地")
-            else:
-                st.success("✅ 配置已保存到session（仅本次会话有效）")
-            
-            st.rerun()
-    
-    with col_config2:
-        if st.button("🔄 重置配置", use_container_width=True):
-            st.session_state.github_owner = ""
-            st.session_state.github_repo = ""
-            st.session_state.github_path = "cases_database.json"
-            st.session_state.github_branch = "main"
-            st.session_state.github_token = ""
-            st.session_state.api_key = ""
-            st.rerun()
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # 显示当前配置状态
-    if st.session_state.get("github_token"):
-        st.success("✅ Token已配置")
+    # 检查API Key
+    api_key = get_api_key()
+    if api_key:
+        st.success("✅ DeepSeek API Key 已配置")
     else:
-        st.warning("⚠️ Token未配置")
+        st.error("❌ DeepSeek API Key 未配置")
     
-    st.markdown("---")
-    st.markdown("### 📂 文件操作")
-    
-    # 读取文件按钮
-    if st.button("📖 从GitHub读取", use_container_width=True):
-        if not st.session_state.get("github_token"):
-            st.error("❌ 请先配置GitHub Token")
-        elif not st.session_state.get("github_owner") or not st.session_state.get("github_repo"):
-            st.error("❌ 请填写完整的GitHub配置")
-        else:
-            with st.spinner("正在读取文件..."):
-                success, content, sha, message = github_read_file(
-                    st.session_state.github_owner,
-                    st.session_state.github_repo,
-                    st.session_state.github_path,
-                    st.session_state.github_token,
-                    st.session_state.github_branch
-                )
-                if success:
-                    try:
-                        data = json.loads(content)
-                        all_data, all_cases = load_all_cases_from_data(data)
-                        st.session_state.all_data = all_data
-                        st.session_state.all_cases = all_cases
-                        st.session_state.github_file_sha = sha
-                        st.session_state.all_data_modified = False
-                        st.success(f"✅ 读取成功！共 {len(all_cases)} 个案例")
-                        st.rerun()
-                    except json.JSONDecodeError:
-                        st.error("❌ 文件格式错误，不是有效的JSON")
-                else:
-                    st.error(f"❌ {message}")
-    
-    # 创建新文件按钮
-    if st.button("📝 创建新文件", use_container_width=True):
-        if not st.session_state.get("github_token"):
-            st.error("❌ 请先配置GitHub Token")
-        elif not st.session_state.get("github_owner") or not st.session_state.get("github_repo"):
-            st.error("❌ 请填写完整的GitHub配置")
-        else:
-            empty_data = {"cases": []}
-            content = json.dumps(empty_data, ensure_ascii=False, indent=2)
-            success, message = github_write_file(
-                st.session_state.github_owner,
-                st.session_state.github_repo,
-                st.session_state.github_path,
-                content,
-                st.session_state.github_token,
-                f"创建新文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                st.session_state.github_branch
-            )
-            if success:
-                st.success("✅ 新文件创建成功！请点击'从GitHub读取'加载")
-                st.rerun()
-            else:
-                st.error(f"❌ {message}")
-    
-    # 删除文件按钮
-    if st.button("🗑️ 删除文件", use_container_width=True):
-        if not st.session_state.get("github_token"):
-            st.error("❌ 请先配置GitHub Token")
-        elif not st.session_state.get("github_owner") or not st.session_state.get("github_repo"):
-            st.error("❌ 请填写完整的GitHub配置")
-        else:
-            if st.checkbox("确认删除", value=False):
-                success, message = github_delete_file(
-                    st.session_state.github_owner,
-                    st.session_state.github_repo,
-                    st.session_state.github_path,
-                    st.session_state.github_token,
-                    f"删除文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    st.session_state.github_branch
-                )
-                if success:
-                    st.success("✅ 文件删除成功")
-                    st.session_state.all_data = {"cases": []}
-                    st.session_state.all_cases = []
-                    st.rerun()
-                else:
-                    st.error(f"❌ {message}")
-            else:
-                st.warning("⚠️ 请勾选'确认删除'")
+    # 检查GitHub配置
+    github_config = get_github_config()
+    if github_config["token"] and github_config["owner"] and github_config["repo"]:
+        st.success(f"✅ GitHub 已配置: {github_config['owner']}/{github_config['repo']}")
+    else:
+        st.error("❌ GitHub 配置不完整")
     
     st.markdown("---")
     st.markdown("### 📂 数据源")
     
     data_source = st.radio(
         "选择数据源",
-        ["在线URL", "上传文件"],
+        ["GitHub", "在线URL", "上传文件"],
         index=0,
         label_visibility="collapsed"
     )
     
-    if data_source == "在线URL":
+    # 从GitHub加载
+    if data_source == "GitHub":
+        st.session_state.data_source = "github"
+        st.markdown("#### GitHub文件")
+        
+        github_config = get_github_config()
+        st.caption(f"📁 {github_config['path']}")
+        st.caption(f"📂 {github_config['branch']}")
+        
+        if st.button("📖 从GitHub读取", use_container_width=True, type="primary"):
+            if not github_config["token"]:
+                st.error("❌ GitHub Token未配置")
+            elif not github_config["owner"] or not github_config["repo"]:
+                st.error("❌ GitHub配置不完整")
+            else:
+                with st.spinner("正在读取文件..."):
+                    success, content, sha, message = github_read_file(
+                        github_config["owner"],
+                        github_config["repo"],
+                        github_config["path"],
+                        github_config["token"],
+                        github_config["branch"]
+                    )
+                    if success:
+                        try:
+                            data = json.loads(content)
+                            all_data, all_cases = load_all_cases_from_data(data)
+                            st.session_state.all_data = all_data
+                            st.session_state.all_cases = all_cases
+                            st.session_state.github_file_sha = sha
+                            st.session_state.all_data_modified = False
+                            st.success(f"✅ 读取成功！共 {len(all_cases)} 个案例")
+                            st.rerun()
+                        except json.JSONDecodeError:
+                            st.error("❌ 文件格式错误，不是有效的JSON")
+                    else:
+                        st.error(f"❌ {message}")
+        
+        # 创建新文件
+        if st.button("📝 创建新文件", use_container_width=True):
+            if not github_config["token"]:
+                st.error("❌ 请先配置GitHub Token")
+            else:
+                empty_data = {"cases": []}
+                content = json.dumps(empty_data, ensure_ascii=False, indent=2)
+                success, message = github_write_file(
+                    github_config["owner"],
+                    github_config["repo"],
+                    github_config["path"],
+                    content,
+                    github_config["token"],
+                    f"创建新文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                    github_config["branch"]
+                )
+                if success:
+                    st.success("✅ 新文件创建成功！请点击'从GitHub读取'加载")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
+        
+        # 删除文件
+        if st.button("🗑️ 删除文件", use_container_width=True):
+            if not github_config["token"]:
+                st.error("❌ 请先配置GitHub Token")
+            else:
+                if st.checkbox("确认删除", value=False):
+                    success, message = github_delete_file(
+                        github_config["owner"],
+                        github_config["repo"],
+                        github_config["path"],
+                        github_config["token"],
+                        f"删除文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                        github_config["branch"]
+                    )
+                    if success:
+                        st.success("✅ 文件删除成功")
+                        st.session_state.all_data = {"cases": []}
+                        st.session_state.all_cases = []
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {message}")
+                else:
+                    st.warning("⚠️ 请勾选'确认删除'")
+    
+    # 从在线URL加载
+    elif data_source == "在线URL":
         st.session_state.data_source = "url"
-        default_url = st.text_input(
+        st.markdown("#### 🔗 在线数据")
+        
+        default_url = get_json_url()
+        json_url = st.text_input(
             "JSON URL",
-            value=st.session_state.get("json_url", ""),
+            value=st.session_state.get("json_url", default_url),
             placeholder="输入JSON文件的在线URL",
-            label_visibility="collapsed",
-            key="json_url_input"
+            label_visibility="collapsed"
         )
         
-        if default_url:
-            st.session_state.json_url = default_url
+        if json_url:
+            st.session_state.json_url = json_url
             if st.button("📥 加载在线数据", use_container_width=True, type="primary"):
                 with st.spinner("正在加载在线数据..."):
-                    data = load_data_from_url(default_url)
+                    data = load_data_from_url(json_url)
                     if data:
                         all_data, all_cases = load_all_cases_from_data(data)
                         st.session_state.all_data = all_data
@@ -673,9 +577,12 @@ with st.sidebar:
                         st.session_state.all_data_modified = False
                         st.success("✅ 数据加载成功！")
                         st.rerun()
+    
+    # 上传文件
     else:
         st.session_state.data_source = "upload"
-        file = st.file_uploader("📂 上传JSON", type=["json"], label_visibility="collapsed")
+        st.markdown("#### 📂 上传文件")
+        file = st.file_uploader("上传JSON文件", type=["json"], label_visibility="collapsed")
         
         if file:
             all_data, all_cases = load_all_cases(file)
@@ -690,517 +597,24 @@ all_cases = st.session_state.all_cases
 
 if all_data is None or all_cases is None or not all_cases:
     st.info("👈 请从GitHub读取、上传文件或加载在线数据")
-    st.stop()
-
-# 获取所有案例的ID和标题
-case_options = {}
-for case in all_cases:
-    case_id = case.get("case_id", "unknown")
-    title = case.get("title", f"案例 {case_id}")
-    case_options[f"{case_id}"] = case_id
-
-# 案例选择
-selected_case_id = st.sidebar.selectbox(
-    "📋 案例",
-    options=list(case_options.keys()),
-    index=0,
-    label_visibility="collapsed"
-)
-
-# 更新当前案例ID
-st.session_state.current_case_id = selected_case_id
-
-# 加载选中的案例
-case, bars_df, comments = load_case_by_id(all_cases, selected_case_id)
-
-if case is None:
-    st.error(f"未找到案例 ID: {selected_case_id}")
-    st.stop()
-
-# 过滤编号0的空K线
-if 0 in bars_df["bar"].values:
-    bar_zero = bars_df[bars_df["bar"] == 0]
-    if bar_zero.empty or (bar_zero["open"].isna().all() and bar_zero["close"].isna().all()):
-        bars_df = bars_df[bars_df["bar"] != 0]
-
-# 获取所有K线编号
-all_bars = sorted(bars_df["bar"].unique())
-total_bars = len(all_bars)
-max_bar = max(all_bars) if len(all_bars) > 0 else 0
-min_bar = min(all_bars) if len(all_bars) > 0 else 0
-
-# 计算价格范围
-price_min = bars_df["low"].min()
-price_max = bars_df["high"].max()
-price_padding = (price_max - price_min) * 0.05
-
-# 获取有注释的K线列表
-comment_bars = sorted([int(x) for x in comments.keys() if int(x) > 0])
-
-# 获取第一根正数K线
-first_positive_bar = min([b for b in all_bars if b > 0]) if any(b > 0 for b in all_bars) else None
-
-# 初始化当前K线状态
-if "current_bar" not in st.session_state or st.session_state.get("case_id") != selected_case_id:
-    if first_positive_bar is not None:
-        st.session_state.current_bar = first_positive_bar
-    else:
-        st.session_state.current_bar = max_bar if max_bar > 0 else 1
-    st.session_state.case_id = selected_case_id
-
-if st.session_state.current_bar > max_bar:
-    st.session_state.current_bar = first_positive_bar if first_positive_bar is not None else max_bar
-
-if first_positive_bar is not None and st.session_state.current_bar < first_positive_bar:
-    st.session_state.current_bar = first_positive_bar
-
-# =======================
-# 显示保存状态
-# =======================
-if st.session_state.save_message:
-    st.markdown(f'<div class="save-success">{st.session_state.save_message}</div>', unsafe_allow_html=True)
-    st.session_state.save_message = ""
-
-if st.session_state.all_data_modified:
-    st.markdown('<div class="save-status">⚠️ 数据已修改，请点击"💾 保存到GitHub"保存</div>', unsafe_allow_html=True)
-
-# =======================
-# 顶部状态栏
-# =======================
-current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
-
-price_html = ""
-if not current_row.empty:
-    row = current_row.iloc[0]
-    change = row['close'] - row['open']
-    change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
-    is_up = row['close'] > row['open']
-    color_style = '#28a745' if is_up else '#dc3545'
     
-    price_html = (
-        '<span class="price-inline-item"><strong>开</strong>' + f'{row["open"]:.2f}' + '</span>'
-        '<span class="price-inline-item"><strong>高</strong>' + f'{row["high"]:.2f}' + '</span>'
-        '<span class="price-inline-item"><strong>低</strong>' + f'{row["low"]:.2f}' + '</span>'
-        '<span class="price-inline-item"><strong>收</strong>' + f'{row["close"]:.2f}' + '</span>'
-        '<span class="price-inline-item" style="border-left-color: ' + color_style + ';">'
-        '<strong>涨跌</strong> ' + f'{change:+.2f}' + '(' + f'{change_pct:+.2f}' + '%)'
-        '</span>'
-    )
-
-bar_str = str(st.session_state.current_bar)
-has_comment = st.session_state.current_bar > 0 and bar_str in comments
-comment_status = '<span class="has-comment">✅</span>' if has_comment else '<span class="no-comment">❌</span>'
-
-status_html = f'''
-<div class="top-status">
-    <span class="status-item">
-        <span class="label">Bar</span>
-        <span class="value">{st.session_state.current_bar}</span>
-    </span>
-    <span class="status-item">
-        <span class="label">总数</span>
-        <span class="value">{total_bars}</span>
-    </span>
-    <span class="status-item">
-        <span class="label">注释</span>
-        <span class="value">{comment_status}</span>
-    </span>
-    <span class="status-item">
-        <span class="label">ID</span>
-        <span class="value">{selected_case_id}</span>
-    </span>
-    <span class="status-item">
-        <span class="label">📅</span>
-        <span class="value">{case.get('date', '')}</span>
-    </span>
-    <span class="status-item" style="flex:0;">
-        <span class="label">{case.get('title', '')}</span>
-    </span>
-    <span class="price-inline">
-        {price_html}
-    </span>
-</div>
-'''
-
-st.markdown(status_html, unsafe_allow_html=True)
-st.markdown("<br><br>", unsafe_allow_html=True)
-
-# =======================
-# K线图表
-# =======================
-visible = bars_df[bars_df["bar"] <= st.session_state.current_bar]
-
-current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
-if not current_row.empty:
-    row = current_row.iloc[0]
-    is_up = row["close"] > row["open"]
-    color = "red" if is_up else "black"
-else:
-    color = "blue"
-
-fig = go.Figure()
-
-up_bars = visible[visible["close"] > visible["open"]]
-down_bars = visible[visible["close"] <= visible["open"]]
-
-if not up_bars.empty:
-    fig.add_trace(go.Candlestick(
-        x=up_bars["bar"],
-        open=up_bars["open"],
-        high=up_bars["high"],
-        low=up_bars["low"],
-        close=up_bars["close"],
-        name="阳线",
-        showlegend=False,
-        increasing_line_color="red",
-        decreasing_line_color="red"
-    ))
-
-if not down_bars.empty:
-    fig.add_trace(go.Candlestick(
-        x=down_bars["bar"],
-        open=down_bars["open"],
-        high=down_bars["high"],
-        low=down_bars["low"],
-        close=down_bars["close"],
-        name="阴线",
-        showlegend=False,
-        increasing_line_color="black",
-        decreasing_line_color="black"
-    ))
-
-if min_bar < 0:
-    fig.add_vline(x=0.5, line_width=1, line_color="gray", line_dash="dot")
-    fig.add_annotation(
-        x=0.5,
-        y=price_max * 0.95,
-        text="盘前 | 正式",
-        showarrow=False,
-        font=dict(size=8, color="gray")
-    )
-
-fig.add_vline(
-    x=st.session_state.current_bar,
-    line_width=2,
-    line_color=color,
-    line_dash="dash"
-)
-
-if bar_str in comments and st.session_state.current_bar > 0:
-    trans = comments[bar_str].get("translation", "")
-    if trans:
-        trans_preview = trans[:20] + "..." if len(trans) > 20 else trans
-        current_k = visible[visible["bar"] == st.session_state.current_bar]
-        if not current_k.empty:
-            y_pos = current_k["high"].max() * 1.02
-            fig.add_annotation(
-                x=st.session_state.current_bar,
-                y=y_pos,
-                text=f"📝 {trans_preview}",
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=1,
-                arrowwidth=2,
-                arrowcolor="orange",
-                font=dict(size=8)
-            )
-
-x_min = min_bar - 0.5 if min_bar < 0 else -0.5
-x_max = max_bar + 0.5
-
-fig.update_layout(
-    height=350,
-    margin=dict(l=3, r=3, t=20, b=15),
-    xaxis_rangeslider_visible=False,
-    showlegend=False,
-    xaxis=dict(
-        tickmode='linear',
-        dtick=max(1, total_bars // 20),
-        gridcolor='lightgray',
-        gridwidth=0.5,
-        range=[x_min, x_max],
-        tickfont=dict(size=8)
-    ),
-    yaxis=dict(
-        range=[price_min - price_padding, price_max + price_padding],
-        gridcolor='lightgray',
-        gridwidth=0.5,
-        tickfont=dict(size=8)
-    ),
-    plot_bgcolor='white',
-    paper_bgcolor='white'
-)
-
-st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-# -------- K线导航控制条 --------
-current_idx = all_bars.index(st.session_state.current_bar) if st.session_state.current_bar in all_bars else 0
-total = len(all_bars)
-
-ctrl_cols = st.columns([0.5, 0.5, 0.5, 3, 0.5, 0.5])
-
-with ctrl_cols[0]:
-    if st.button("⏮", help="第一根"):
-        st.session_state.current_bar = all_bars[0]
-        st.rerun()
-
-with ctrl_cols[1]:
-    if st.button("◀", help="上一根"):
-        if current_idx > 0:
-            st.session_state.current_bar = all_bars[current_idx - 1]
-            st.rerun()
-
-with ctrl_cols[2]:
-    if st.button("▶", help="下一根"):
-        if current_idx < total - 1:
-            st.session_state.current_bar = all_bars[current_idx + 1]
-            st.rerun()
-
-with ctrl_cols[3]:
-    progress = (current_idx + 1) / total if total > 0 else 0
-    st.progress(progress, text=f"{current_idx + 1}/{total}")
-
-with ctrl_cols[4]:
-    if st.button("⏭", help="最后一根"):
-        if current_idx < total - 1:
-            st.session_state.current_bar = all_bars[-1]
-            st.rerun()
-
-with ctrl_cols[5]:
-    if positive_comment_bars := [b for b in comment_bars if b > 0]:
-        if st.button("💬跳", help="跳转到有注释的K线"):
-            for b in positive_comment_bars:
-                if b > st.session_state.current_bar:
-                    st.session_state.current_bar = b
-                    st.rerun()
-            st.session_state.current_bar = positive_comment_bars[0]
-            st.rerun()
-
-# =======================
-# 下方信息面板 - 注释内容
-# =======================
-
-st.markdown("---")
-
-if has_comment:
-    item = comments[bar_str]
-    original_text = item.get("original", "")
-    translation = item.get("translation", "")
-    plain_text = item.get("plain", "")
-    
-    st.markdown(f"### 📊 Bar {bar_str} 注释内容")
-    
-    if original_text:
-        st.markdown(f'<div class="original-text">📖 <b>原文:</b> {original_text}</div>', unsafe_allow_html=True)
-    else:
-        st.info("ℹ️ 此K线没有原文内容")
-    
-    if translation:
-        st.markdown(f'<div class="comment-box">📝 <b>翻译:</b> {translation}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="comment-box" style="border-left-color: #6c757d; color: #6c757d;">📝 <b>翻译:</b> (空)</div>', unsafe_allow_html=True)
-    
-    if plain_text:
-        st.markdown(f'<div class="comment-box">💬 <b>白话:</b> {plain_text}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="comment-box" style="border-left-color: #6c757d; color: #6c757d;">💬 <b>白话:</b> (空)</div>', unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("#### ✏️ 编辑注释")
-    edit_row = st.columns([2, 2])
-    
-    trans_current = st.session_state.get(f"trans_edit_{bar_str}", comments[bar_str].get("translation", ""))
-    plain_current = st.session_state.get(f"plain_edit_{bar_str}", comments[bar_str].get("plain", ""))
-
-    with edit_row[0]:
-        st.text_area(
-            "翻译编辑",
-            value=trans_current,
-            height=80,
-            key=f"trans_edit_{bar_str}",
-            label_visibility="collapsed",
-            placeholder="在此编辑翻译内容..."
-        )
-
-    with edit_row[1]:
-        st.text_area(
-            "白话编辑",
-            value=plain_current,
-            height=80,
-            key=f"plain_edit_{bar_str}",
-            label_visibility="collapsed",
-            placeholder="在此编辑白话解释..."
-        )
-
-    # 保存按钮
-    st.markdown("---")
-    st.markdown("#### 💾 保存操作")
-    
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
-    
-    with col_btn1:
-        if st.button("💾 保存到内存", use_container_width=True, type="primary"):
-            # 从编辑框获取内容
-            trans_edit = st.session_state.get(f"trans_edit_{bar_str}", "")
-            plain_edit = st.session_state.get(f"plain_edit_{bar_str}", "")
-            
-            # 更新comments
-            if bar_str not in comments:
-                comments[bar_str] = {}
-            comments[bar_str]["translation"] = trans_edit
-            comments[bar_str]["plain"] = plain_edit
-            
-            # 更新到all_data
-            for c in st.session_state.all_data["cases"]:
-                if str(c.get("case_id", "")) == str(selected_case_id):
-                    c["comments"] = comments
-                    break
-            
-            st.session_state.all_data_modified = True
-            st.session_state.save_message = f"✅ 已保存到内存！"
-            st.rerun()
-    
-    with col_btn2:
-        if st.button("🌐 AI翻译", use_container_width=True):
-            if original_text:
-                with st.spinner("AI正在翻译..."):
-                    result = ai_translate(original_text)
-                    if bar_str not in comments:
-                        comments[bar_str] = {}
-                    comments[bar_str]["translation"] = result
-                    
-                    for c in st.session_state.all_data["cases"]:
-                        if str(c.get("case_id", "")) == str(selected_case_id):
-                            c["comments"] = comments
-                            break
-                    
-                    st.session_state.all_data_modified = True
-                    st.session_state[f"trans_edit_{bar_str}"] = result
-                    st.session_state.save_message = f"✅ AI翻译完成"
-                    st.rerun()
-            else:
-                st.warning("没有原文可翻译")
-    
-    with col_btn3:
-        if st.button("🗣️ AI白话", use_container_width=True):
-            if original_text:
-                with st.spinner("AI正在改写..."):
-                    result = ai_plain(original_text)
-                    if bar_str not in comments:
-                        comments[bar_str] = {}
-                    comments[bar_str]["plain"] = result
-                    
-                    for c in st.session_state.all_data["cases"]:
-                        if str(c.get("case_id", "")) == str(selected_case_id):
-                            c["comments"] = comments
-                            break
-                    
-                    st.session_state.all_data_modified = True
-                    st.session_state[f"plain_edit_{bar_str}"] = result
-                    st.session_state.save_message = f"✅ AI白话完成"
-                    st.rerun()
-            else:
-                st.warning("没有原文可改写")
-
-else:
-    current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
-    if not current_row.empty:
-        row = current_row.iloc[0]
-        st.markdown(f"##### Bar {bar_str} 价格信息")
+    # 显示配置信息
+    with st.expander("🔧 配置说明"):
+        st.markdown("""
+        ### 如何配置Streamlit Secrets
         
-        change = row['close'] - row['open']
-        change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
-        is_up = row['close'] > row['open']
+        在项目根目录创建 `.streamlit/secrets.toml` 文件：
         
-        st.markdown(f"""
-        <div class="price-info">
-            <span class="price-item"><strong>开盘</strong> {row['open']:.2f}</span>
-            <span class="price-item"><strong>最高</strong> {row['high']:.2f}</span>
-            <span class="price-item"><strong>最低</strong> {row['low']:.2f}</span>
-            <span class="price-item"><strong>收盘</strong> {row['close']:.2f}</span>
-            <span class="price-item" style="border-left-color: {'#28a745' if is_up else '#dc3545'};">
-                <strong>涨跌</strong> 
-                {change:+.2f} 
-                ({change_pct:+.2f}%)
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
-
-# =======================
-# 保存到GitHub - 在页面底部
-# =======================
-st.markdown("---")
-st.markdown("### 🚀 保存到GitHub")
-
-# 显示当前数据预览
-with st.expander("📊 查看要保存的数据"):
-    st.json({
-        "case_id": selected_case_id,
-        "bar": bar_str,
-        "translation": comments.get(bar_str, {}).get("translation", ""),
-        "plain": comments.get(bar_str, {}).get("plain", ""),
-        "total_cases": len(all_cases)
-    })
-
-col_save1, col_save2 = st.columns([2, 1])
-
-with col_save1:
-    if st.button("💾 保存到GitHub", use_container_width=True, type="primary"):
-        if not st.session_state.get("github_token"):
-            st.error("❌ 请先配置GitHub Token")
-        elif not st.session_state.get("github_owner") or not st.session_state.get("github_repo"):
-            st.error("❌ 请填写完整的GitHub配置")
-        else:
-            with st.spinner("正在保存到GitHub..."):
-                content = save_json(st.session_state.all_data)
-                success, message = github_write_file(
-                    st.session_state.github_owner,
-                    st.session_state.github_repo,
-                    st.session_state.github_path,
-                    content,
-                    st.session_state.github_token,
-                    f"更新案例 {selected_case_id} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    st.session_state.github_branch
-                )
-                if success:
-                    st.success(message)
-                    st.session_state.all_data_modified = False
-                    st.session_state.save_message = "✅ 成功保存到GitHub！"
-                    st.rerun()
-                else:
-                    st.error(message)
-
-with col_save2:
-    # 下载JSON作为备选
-    json_str = save_json(st.session_state.all_data)
-    st.download_button(
-        "📥 下载JSON备份",
-        json_str,
-        file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-        mime="application/json",
-        use_container_width=True,
-        help="下载JSON备份（如果GitHub保存失败）"
-    )
-
-# 显示修改状态和文件信息
-col_info1, col_info2, col_info3 = st.columns(3)
-with col_info1:
-    if st.session_state.all_data_modified:
-        st.info("💡 数据已修改，请点击 '💾 保存到GitHub' 保存")
-    else:
-        st.success("✅ 数据已保存")
+        ```toml
+        # DeepSeek API Key
+        DEEPSEEK_API_KEY = "your_deepseek_api_key_here"
         
-with col_info2:
-    st.caption(f"📁 文件: {st.session_state.get('github_path', '未设置')}")
-    
-with col_info3:
-    st.caption(f"📂 分支: {st.session_state.get('github_branch', 'main')}")
-
-# 显示当前注释内容
-st.markdown("---")
-st.markdown("### 📝 当前K线注释")
-st.json({
-    "bar": bar_str,
-    "translation": comments.get(bar_str, {}).get("translation", ""),
-    "plain": comments.get(bar_str, {}).get("plain", "")
-})
+        # GitHub配置
+        GITHUB_TOKEN = "your_github_token_here"
+        GITHUB_OWNER = "your_username"
+        GITHUB_REPO = "your_repo_name"
+        GITHUB_PATH = "cases_database.json"
+        GITHUB_BRANCH = "main"
+        
+        # 默认JSON URL（可选）
+        JSON_URL = "https://raw.githubusercontent.com/your_username/your_repo/main/cases_database.json"
