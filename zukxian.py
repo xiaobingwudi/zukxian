@@ -1,5 +1,5 @@
 # Al Brooks AI Study Tool (single-file Streamlit version)
-# 支持完整的GitHub文件读写操作
+# 支持GitHub Token持久化存储
 
 import json
 import os
@@ -68,10 +68,7 @@ def ai_plain(text):
 # --------------------- GitHub完整操作模块 ---------------------
 
 def github_read_file(owner, repo, path, token, branch="main"):
-    """
-    从GitHub读取文件内容
-    返回: (success, content, sha, message)
-    """
+    """从GitHub读取文件内容"""
     try:
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
         headers = {
@@ -84,7 +81,6 @@ def github_read_file(owner, repo, path, token, branch="main"):
         
         if response.status_code == 200:
             data = response.json()
-            # 解码base64内容
             content = base64.b64decode(data["content"]).decode('utf-8')
             sha = data.get("sha")
             return True, content, sha, "读取成功"
@@ -97,10 +93,7 @@ def github_read_file(owner, repo, path, token, branch="main"):
 
 
 def github_write_file(owner, repo, path, content, token, commit_message=None, branch="main", sha=None):
-    """
-    写入文件到GitHub
-    返回: (success, message)
-    """
+    """写入文件到GitHub"""
     if not token:
         return False, "❌ 请提供GitHub Token"
     
@@ -114,11 +107,9 @@ def github_write_file(owner, repo, path, content, token, commit_message=None, br
             "Accept": "application/vnd.github.v3+json"
         }
         
-        # 如果没有提供sha，尝试获取
         if not sha:
             success, _, sha, _ = github_read_file(owner, repo, path, token, branch)
         
-        # 准备内容
         content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
         
         payload = {
@@ -141,33 +132,8 @@ def github_write_file(owner, repo, path, content, token, commit_message=None, br
         return False, f"❌ 保存失败: {str(e)}"
 
 
-def github_list_files(owner, repo, token, path="", branch="main"):
-    """
-    列出GitHub仓库中的文件
-    """
-    try:
-        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-        headers = {
-            "Authorization": f"token {token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        params = {"ref": branch} if branch else {}
-        
-        response = requests.get(url, headers=headers, params=params)
-        
-        if response.status_code == 200:
-            files = response.json()
-            return True, files, "获取成功"
-        else:
-            return False, None, f"获取失败: {response.status_code}"
-    except Exception as e:
-        return False, None, f"错误: {str(e)}"
-
-
 def github_delete_file(owner, repo, path, token, commit_message=None, branch="main"):
-    """
-    删除GitHub文件
-    """
+    """删除GitHub文件"""
     if not token:
         return False, "❌ 请提供GitHub Token"
     
@@ -175,7 +141,6 @@ def github_delete_file(owner, repo, path, token, commit_message=None, branch="ma
         commit_message = f"删除文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     
     try:
-        # 先获取文件的sha
         success, _, sha, _ = github_read_file(owner, repo, path, token, branch)
         if not success:
             return False, "文件不存在"
@@ -201,8 +166,6 @@ def github_delete_file(owner, repo, path, token, commit_message=None, branch="ma
     except Exception as e:
         return False, f"❌ 错误: {str(e)}"
 
-
-# --------------------- 数据加载和保存模块 ---------------------
 
 def load_data_from_url(url):
     try:
@@ -243,6 +206,70 @@ def load_case_by_id(cases, case_id):
 def save_json(data):
     txt = json.dumps(data, ensure_ascii=False, indent=2)
     return txt
+
+
+# --------------------- 配置管理模块 ---------------------
+
+def save_config_to_session(config_key, value):
+    """保存配置到session_state"""
+    st.session_state[config_key] = value
+
+
+def get_config_from_session(config_key, default=None):
+    """从session_state读取配置"""
+    return st.session_state.get(config_key, default)
+
+
+def save_github_config(owner, repo, path, token, branch):
+    """保存GitHub配置"""
+    st.session_state.github_owner = owner
+    st.session_state.github_repo = repo
+    st.session_state.github_path = path
+    st.session_state.github_token = token
+    st.session_state.github_branch = branch
+
+
+def load_github_config():
+    """加载GitHub配置"""
+    return {
+        "owner": st.session_state.get("github_owner", ""),
+        "repo": st.session_state.get("github_repo", ""),
+        "path": st.session_state.get("github_path", "cases_database.json"),
+        "token": st.session_state.get("github_token", ""),
+        "branch": st.session_state.get("github_branch", "main")
+    }
+
+
+def save_config_to_file():
+    """将配置保存到本地文件（仅在本地运行有效）"""
+    try:
+        config = {
+            "github_owner": st.session_state.get("github_owner", ""),
+            "github_repo": st.session_state.get("github_repo", ""),
+            "github_path": st.session_state.get("github_path", "cases_database.json"),
+            "github_branch": st.session_state.get("github_branch", "main"),
+            "api_key": st.session_state.get("api_key", ""),
+            "json_url": st.session_state.get("json_url", "")
+        }
+        with open(".config.json", "w") as f:
+            json.dump(config, f)
+        return True
+    except:
+        return False
+
+
+def load_config_from_file():
+    """从本地文件加载配置（仅在本地运行有效）"""
+    try:
+        if os.path.exists(".config.json"):
+            with open(".config.json", "r") as f:
+                config = json.load(f)
+                for key, value in config.items():
+                    st.session_state[key] = value
+            return True
+    except:
+        pass
+    return False
 
 
 # --------------------- UI 界面模块 ---------------------
@@ -407,6 +434,13 @@ st.markdown("""
         margin: 4px 0;
         font-size: 0.75rem;
     }
+    .config-box {
+        background: #e8f4fd;
+        padding: 10px;
+        border-radius: 4px;
+        border: 1px solid #b8d4e8;
+        margin: 10px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -429,6 +463,9 @@ if "save_message" not in st.session_state:
 if "github_file_sha" not in st.session_state:
     st.session_state.github_file_sha = None
 
+# 尝试从文件加载配置（仅本地有效）
+load_config_from_file()
+
 # ---------------- 侧边栏配置 ----------------
 with st.sidebar:
     st.markdown("### ⚙️ 配置")
@@ -437,41 +474,107 @@ with st.sidebar:
         type="password",
         value=st.session_state.get("api_key", ""),
         placeholder="输入API Key",
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="api_key_input"
     )
     
     st.markdown("---")
     st.markdown("### 🔑 GitHub配置")
+    st.markdown('<div class="config-box">', unsafe_allow_html=True)
+    
+    # GitHub配置输入
+    github_owner = st.text_input(
+        "仓库所有者",
+        value=st.session_state.get("github_owner", ""),
+        placeholder="你的GitHub用户名",
+        key="github_owner_input"
+    )
+    
+    github_repo = st.text_input(
+        "仓库名称",
+        value=st.session_state.get("github_repo", ""),
+        placeholder="仓库名称",
+        key="github_repo_input"
+    )
+    
+    github_path = st.text_input(
+        "文件路径",
+        value=st.session_state.get("github_path", "cases_database.json"),
+        placeholder="文件路径",
+        key="github_path_input"
+    )
+    
+    github_branch = st.text_input(
+        "分支",
+        value=st.session_state.get("github_branch", "main"),
+        placeholder="分支名称",
+        key="github_branch_input"
+    )
     
     github_token = st.text_input(
         "GitHub Token",
         type="password",
         value=st.session_state.get("github_token", ""),
-        help="需要repo权限的Personal Access Token"
+        placeholder="输入GitHub Token",
+        help="需要repo权限的Personal Access Token",
+        key="github_token_input"
     )
-    st.session_state.github_token = github_token
     
-    github_owner = st.text_input("仓库所有者", value=st.session_state.get("github_owner", ""))
-    github_repo = st.text_input("仓库名称", value=st.session_state.get("github_repo", ""))
-    github_path = st.text_input("文件路径", value=st.session_state.get("github_path", "cases_database.json"))
-    github_branch = st.text_input("分支", value=st.session_state.get("github_branch", "main"))
+    # 保存配置按钮
+    col_config1, col_config2 = st.columns(2)
+    with col_config1:
+        if st.button("💾 保存配置", use_container_width=True):
+            # 保存到session_state
+            st.session_state.github_owner = github_owner
+            st.session_state.github_repo = github_repo
+            st.session_state.github_path = github_path
+            st.session_state.github_branch = github_branch
+            st.session_state.github_token = github_token
+            st.session_state.api_key = st.session_state.get("api_key_input", "")
+            
+            # 尝试保存到文件（本地）
+            if save_config_to_file():
+                st.success("✅ 配置已保存到本地")
+            else:
+                st.success("✅ 配置已保存到session（仅本次会话有效）")
+            
+            st.rerun()
     
-    st.session_state.github_owner = github_owner
-    st.session_state.github_repo = github_repo
-    st.session_state.github_path = github_path
-    st.session_state.github_branch = github_branch
+    with col_config2:
+        if st.button("🔄 重置配置", use_container_width=True):
+            st.session_state.github_owner = ""
+            st.session_state.github_repo = ""
+            st.session_state.github_path = "cases_database.json"
+            st.session_state.github_branch = "main"
+            st.session_state.github_token = ""
+            st.session_state.api_key = ""
+            st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 显示当前配置状态
+    if st.session_state.get("github_token"):
+        st.success("✅ Token已配置")
+    else:
+        st.warning("⚠️ Token未配置")
     
     st.markdown("---")
     st.markdown("### 📂 文件操作")
     
     # 读取文件按钮
     if st.button("📖 从GitHub读取", use_container_width=True):
-        if not github_token or not github_owner or not github_repo:
+        if not st.session_state.get("github_token"):
+            st.error("❌ 请先配置GitHub Token")
+        elif not st.session_state.get("github_owner") or not st.session_state.get("github_repo"):
             st.error("❌ 请填写完整的GitHub配置")
         else:
             with st.spinner("正在读取文件..."):
                 success, content, sha, message = github_read_file(
-                    github_owner, github_repo, github_path, github_token, github_branch
+                    st.session_state.github_owner,
+                    st.session_state.github_repo,
+                    st.session_state.github_path,
+                    st.session_state.github_token,
+                    st.session_state.github_branch
                 )
                 if success:
                     try:
@@ -481,7 +584,7 @@ with st.sidebar:
                         st.session_state.all_cases = all_cases
                         st.session_state.github_file_sha = sha
                         st.session_state.all_data_modified = False
-                        st.success(f"✅ 读取成功！文件大小: {len(content)} 字符")
+                        st.success(f"✅ 读取成功！共 {len(all_cases)} 个案例")
                         st.rerun()
                     except json.JSONDecodeError:
                         st.error("❌ 文件格式错误，不是有效的JSON")
@@ -490,16 +593,21 @@ with st.sidebar:
     
     # 创建新文件按钮
     if st.button("📝 创建新文件", use_container_width=True):
-        if not github_token or not github_owner or not github_repo:
+        if not st.session_state.get("github_token"):
+            st.error("❌ 请先配置GitHub Token")
+        elif not st.session_state.get("github_owner") or not st.session_state.get("github_repo"):
             st.error("❌ 请填写完整的GitHub配置")
         else:
-            # 创建空的数据结构
             empty_data = {"cases": []}
             content = json.dumps(empty_data, ensure_ascii=False, indent=2)
             success, message = github_write_file(
-                github_owner, github_repo, github_path, content, github_token,
+                st.session_state.github_owner,
+                st.session_state.github_repo,
+                st.session_state.github_path,
+                content,
+                st.session_state.github_token,
                 f"创建新文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                github_branch
+                st.session_state.github_branch
             )
             if success:
                 st.success("✅ 新文件创建成功！请点击'从GitHub读取'加载")
@@ -509,14 +617,19 @@ with st.sidebar:
     
     # 删除文件按钮
     if st.button("🗑️ 删除文件", use_container_width=True):
-        if not github_token or not github_owner or not github_repo:
+        if not st.session_state.get("github_token"):
+            st.error("❌ 请先配置GitHub Token")
+        elif not st.session_state.get("github_owner") or not st.session_state.get("github_repo"):
             st.error("❌ 请填写完整的GitHub配置")
         else:
-            if st.sidebar.checkbox("确认删除", value=False):
+            if st.checkbox("确认删除", value=False):
                 success, message = github_delete_file(
-                    github_owner, github_repo, github_path, github_token,
+                    st.session_state.github_owner,
+                    st.session_state.github_repo,
+                    st.session_state.github_path,
+                    st.session_state.github_token,
                     f"删除文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    github_branch
+                    st.session_state.github_branch
                 )
                 if success:
                     st.success("✅ 文件删除成功")
@@ -540,13 +653,12 @@ with st.sidebar:
     
     if data_source == "在线URL":
         st.session_state.data_source = "url"
-        st.markdown("### 🔗 在线数据")
-        
         default_url = st.text_input(
             "JSON URL",
             value=st.session_state.get("json_url", ""),
             placeholder="输入JSON文件的在线URL",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="json_url_input"
         )
         
         if default_url:
@@ -953,12 +1065,10 @@ if has_comment:
             if original_text:
                 with st.spinner("AI正在翻译..."):
                     result = ai_translate(original_text)
-                    # 更新comments
                     if bar_str not in comments:
                         comments[bar_str] = {}
                     comments[bar_str]["translation"] = result
                     
-                    # 更新到all_data
                     for c in st.session_state.all_data["cases"]:
                         if str(c.get("case_id", "")) == str(selected_case_id):
                             c["comments"] = comments
@@ -976,12 +1086,10 @@ if has_comment:
             if original_text:
                 with st.spinner("AI正在改写..."):
                     result = ai_plain(original_text)
-                    # 更新comments
                     if bar_str not in comments:
                         comments[bar_str] = {}
                     comments[bar_str]["plain"] = result
                     
-                    # 更新到all_data
                     for c in st.session_state.all_data["cases"]:
                         if str(c.get("case_id", "")) == str(selected_case_id):
                             c["comments"] = comments
@@ -1038,10 +1146,10 @@ col_save1, col_save2 = st.columns([2, 1])
 
 with col_save1:
     if st.button("💾 保存到GitHub", use_container_width=True, type="primary"):
-        if not st.session_state.github_token:
-            st.error("❌ 请提供GitHub Token")
-        elif not st.session_state.github_owner or not st.session_state.github_repo:
-            st.error("❌ 请提供GitHub仓库信息")
+        if not st.session_state.get("github_token"):
+            st.error("❌ 请先配置GitHub Token")
+        elif not st.session_state.get("github_owner") or not st.session_state.get("github_repo"):
+            st.error("❌ 请填写完整的GitHub配置")
         else:
             with st.spinner("正在保存到GitHub..."):
                 content = save_json(st.session_state.all_data)
@@ -1075,7 +1183,7 @@ with col_save2:
     )
 
 # 显示修改状态和文件信息
-col_info1, col_info2 = st.columns(2)
+col_info1, col_info2, col_info3 = st.columns(3)
 with col_info1:
     if st.session_state.all_data_modified:
         st.info("💡 数据已修改，请点击 '💾 保存到GitHub' 保存")
@@ -1083,8 +1191,10 @@ with col_info1:
         st.success("✅ 数据已保存")
         
 with col_info2:
-    st.caption(f"📁 文件: {st.session_state.github_path}")
-    st.caption(f"📂 分支: {st.session_state.github_branch}")
+    st.caption(f"📁 文件: {st.session_state.get('github_path', '未设置')}")
+    
+with col_info3:
+    st.caption(f"📂 分支: {st.session_state.get('github_branch', 'main')}")
 
 # 显示当前注释内容
 st.markdown("---")
