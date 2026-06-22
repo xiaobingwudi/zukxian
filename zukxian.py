@@ -613,21 +613,25 @@ with ctrl_cols[5]:
 
 bar_str = str(st.session_state.current_bar)
 
-# 判断当前K线是否有注释
-if st.session_state.current_bar > 0 and bar_str in comments:
+# 判断当前K线是否有注释 - 注意comments的key是字符串
+has_comment = st.session_state.current_bar > 0 and bar_str in comments
+
+if has_comment:
+    # 获取注释数据
     item = comments[bar_str]
     original_text = item.get("original", "")
     translation = item.get("translation", "")
     plain_text = item.get("plain", "")
-
-    # 显示Bar编号和基本信息
-    info_header = st.columns([0.5, 5.5])
-    with info_header[0]:
-        st.markdown(f"### Bar {bar_str}")
-    with info_header[1]:
-        if original_text:
-            st.markdown(f'<div class="original-text">📖 <b>原文:</b> {original_text}</div>', unsafe_allow_html=True)
-
+    
+    # 显示Bar编号和原文
+    st.markdown(f"### Bar {bar_str}")
+    
+    # 显示原文
+    if original_text:
+        st.markdown(f'<div class="original-text">📖 <b>原文:</b> {original_text}</div>', unsafe_allow_html=True)
+    else:
+        st.info("此K线没有原文内容")
+    
     # 显示已有的翻译（如果有）
     if translation:
         st.markdown(f'<div class="comment-box">📝 <b>翻译:</b> {translation}</div>', unsafe_allow_html=True)
@@ -636,41 +640,52 @@ if st.session_state.current_bar > 0 and bar_str in comments:
     if plain_text:
         st.markdown(f'<div class="comment-box">💬 <b>白话:</b> {plain_text}</div>', unsafe_allow_html=True)
 
-    # AI功能按钮 - 一行显示
+    # AI功能按钮
+    st.markdown("---")
+    st.markdown("#### 🤖 AI辅助功能")
     ai_cols = st.columns([1, 1, 1, 0.5, 0.5])
     
     with ai_cols[0]:
-        if st.button("🤖 翻译", key="btn_t", use_container_width=True):
-            with st.spinner("AI正在翻译..."):
-                result = ai_translate(original_text)
-                st.session_state[f"trans_{bar_str}"] = result
-                # 自动保存到comments
-                comments[bar_str]["translation"] = result
-                for c in all_data["cases"]:
-                    if str(c.get("case_id", "")) == str(selected_case_id):
-                        c["comments"] = comments
-                        break
-                st.rerun()
+        if st.button("🌐 翻译", key="btn_t", use_container_width=True):
+            if original_text:
+                with st.spinner("AI正在翻译..."):
+                    result = ai_translate(original_text)
+                    st.session_state[f"trans_{bar_str}"] = result
+                    # 自动保存到comments
+                    comments[bar_str]["translation"] = result
+                    for c in all_data["cases"]:
+                        if str(c.get("case_id", "")) == str(selected_case_id):
+                            c["comments"] = comments
+                            break
+                    st.rerun()
+            else:
+                st.warning("没有原文可翻译")
     
     with ai_cols[1]:
-        if st.button("🤖 解释", key="btn_e", use_container_width=True):
-            with st.spinner("AI正在解释..."):
-                result = ai_explain(original_text)
-                st.session_state[f"explain_{bar_str}"] = result
-                st.rerun()
+        if st.button("💡 解释", key="btn_e", use_container_width=True):
+            if original_text:
+                with st.spinner("AI正在解释..."):
+                    result = ai_explain(original_text)
+                    st.session_state[f"explain_{bar_str}"] = result
+                    st.rerun()
+            else:
+                st.warning("没有原文可解释")
     
     with ai_cols[2]:
-        if st.button("🤖 白话", key="btn_p", use_container_width=True):
-            with st.spinner("AI正在改写..."):
-                result = ai_plain(original_text)
-                st.session_state[f"plain_{bar_str}"] = result
-                # 自动保存到comments
-                comments[bar_str]["plain"] = result
-                for c in all_data["cases"]:
-                    if str(c.get("case_id", "")) == str(selected_case_id):
-                        c["comments"] = comments
-                        break
-                st.rerun()
+        if st.button("🗣️ 白话", key="btn_p", use_container_width=True):
+            if original_text:
+                with st.spinner("AI正在改写..."):
+                    result = ai_plain(original_text)
+                    st.session_state[f"plain_{bar_str}"] = result
+                    # 自动保存到comments
+                    comments[bar_str]["plain"] = result
+                    for c in all_data["cases"]:
+                        if str(c.get("case_id", "")) == str(selected_case_id):
+                            c["comments"] = comments
+                            break
+                    st.rerun()
+            else:
+                st.warning("没有原文可改写")
     
     with ai_cols[3]:
         if st.button("💾", key="save_btn", help="保存所有编辑", use_container_width=True):
@@ -696,7 +711,7 @@ if st.session_state.current_bar > 0 and bar_str in comments:
             help="下载JSON"
         )
 
-    # 显示AI结果（如果有）
+    # 显示AI生成的结果（如果有）
     ai_results = []
     if st.session_state.get(f"trans_{bar_str}"):
         ai_results.append(("翻译", st.session_state[f"trans_{bar_str}"]))
@@ -740,7 +755,7 @@ if st.session_state.current_bar > 0 and bar_str in comments:
             placeholder="在此编辑白话解释..."
         )
 
-    # 自动保存按钮放在编辑框下方
+    # 保存和下载按钮
     col_save, col_download = st.columns([1, 1])
     with col_save:
         if st.button("💾 保存编辑", use_container_width=True):
