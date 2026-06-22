@@ -1,6 +1,5 @@
 # Al Brooks AI Study Tool (single-file Streamlit version)
-# Requirements:
-# pip install streamlit pandas plotly openai
+# 修复保存问题
 
 import json
 import os
@@ -9,19 +8,17 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from openai import OpenAI
+import requests
+from datetime import datetime
+import base64
 
-# 设置页面配置 - 必须在Streamlit命令之前
+# 设置页面配置
 st.set_page_config(page_title="Al Brooks AI Study Tool", layout="wide")
 
 
 # --------------------- AI 功能模块 ---------------------
 
 def get_client():
-    """
-    获取OpenAI客户端实例
-    从session_state中获取API密钥，创建DeepSeek客户端
-    如果未设置API密钥则返回None
-    """
     api_key = st.session_state.get("api_key", "")
     if not api_key:
         return None
@@ -29,14 +26,6 @@ def get_client():
 
 
 def ask_ai(system_prompt, user_prompt):
-    """
-    向AI发送请求并获取响应
-    参数:
-        system_prompt: 系统提示词，定义AI角色和行为
-        user_prompt: 用户问题
-    返回:
-        AI响应文本或错误信息
-    """
     client = get_client()
     if not client:
         return "请先填写 DeepSeek API Key"
@@ -56,10 +45,6 @@ def ask_ai(system_prompt, user_prompt):
 
 
 def ai_translate(text):
-    """
-    将英文交易术语翻译为专业中文
-    保留Al Brooks的专用术语缩写
-    """
     return ask_ai(
         "你是Al Brooks价格行为专家。保留术语缩写，翻译成专业中文。",
         text
@@ -67,10 +52,6 @@ def ai_translate(text):
 
 
 def ai_explain(text):
-    """
-    解释Al Brooks原文背后的市场含义
-    提供交易逻辑和价格行为的深层解读
-    """
     return ask_ai(
         "解释Al Brooks真正想表达的市场含义，不要逐词翻译。",
         text
@@ -78,48 +59,42 @@ def ai_explain(text):
 
 
 def ai_plain(text):
-    """
-    将专业交易内容改写为通俗易懂的语言
-    适合初学者理解
-    """
     return ask_ai(
         "把内容改写成普通交易员能看懂的大白话。",
         text
     )
 
 
-# --------------------- JSON 数据处理模块 ---------------------
+# --------------------- 数据加载和保存模块 ---------------------
 
-def load_all_cases(uploaded):
-    """
-    从上传的JSON文件中加载所有案例数据
-    参数:
-        uploaded: Streamlit上传的文件对象
-    返回:
-        data: 完整的JSON数据
-        cases: 案例列表
-    """
-    data = json.loads(uploaded.getvalue().decode("utf-8"))
+def load_data_from_url(url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return data
+    except Exception as e:
+        st.error(f"❌ 加载失败: {e}")
+        return None
 
-    # 处理可能的数组格式
+
+def load_all_cases_from_data(data):
     if isinstance(data, list):
         data = data[0]
+    cases = data.get("cases", [])
+    return data, cases
 
+
+def load_all_cases(uploaded):
+    data = json.loads(uploaded.getvalue().decode("utf-8"))
+    if isinstance(data, list):
+        data = data[0]
     cases = data.get("cases", [])
     return data, cases
 
 
 def load_case_by_id(cases, case_id):
-    """
-    根据案例ID加载特定的案例数据
-    参数:
-        cases: 所有案例列表
-        case_id: 要加载的案例ID
-    返回:
-        case: 案例数据
-        bars_df: K线数据DataFrame
-        comments: 注释数据
-    """
     for case in cases:
         if str(case.get("case_id", "")) == str(case_id):
             bars = pd.DataFrame(case.get("bars", []))
@@ -129,23 +104,54 @@ def load_case_by_id(cases, case_id):
 
 
 def save_json(data):
-    """
-    将数据保存为JSON格式字符串
-    参数:
-        data: 要保存的数据
-    返回:
-        JSON格式字符串
-    """
     txt = json.dumps(data, ensure_ascii=False, indent=2)
     return txt
 
 
+def save_to_github(data, owner, repo, path, token, commit_message=None):
+    if not token:
+        return False, "请提供GitHub Token"
+    
+    if not commit_message:
+        commit_message = f"更新数据 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    
+    try:
+        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        response = requests.get(url, headers=headers)
+        sha = None
+        if response.status_code == 200:
+            sha = response.json().get("sha")
+        
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+        
+        payload = {
+            "message": commit_message,
+            "content": content_base64,
+            "branch": "main"
+        }
+        if sha:
+            payload["sha"] = sha
+        
+        response = requests.put(url, headers=headers, json=payload)
+        if response.status_code in [200, 201]:
+            return True, "✅ 成功保存到GitHub"
+        else:
+            return False, f"❌ 保存失败: {response.text}"
+    except Exception as e:
+        return False, f"❌ 保存失败: {e}"
+
+
 # --------------------- UI 界面模块 ---------------------
 
-# CSS样式 - 加大顶部状态栏字体
+# CSS样式
 st.markdown("""
 <style>
-    /* 全局紧凑 */
     .block-container {
         padding-top: 0.5rem !important;
         padding-bottom: 0.1rem !important;
@@ -153,21 +159,15 @@ st.markdown("""
         padding-right: 0.2rem !important;
         max-width: 100% !important;
     }
-
-    /* 减少元素间距 */
     .element-container {
         margin-bottom: 0.05rem !important;
     }
-
-    /* 紧凑的按钮 */
     .stButton button {
         padding: 0.1rem 0.3rem !important;
         font-size: 0.7rem !important;
         min-height: 1.4rem !important;
         margin: 0 !important;
     }
-
-    /* 紧凑的text area */
     .stTextArea textarea {
         font-size: 0.75rem !important;
         padding: 0.15rem !important;
@@ -178,86 +178,19 @@ st.markdown("""
         font-size: 0.7rem !important;
         margin-bottom: 0 !important;
     }
-
-    /* 紧凑的列间距 */
     .row-widget.stColumns {
         gap: 0.02rem !important;
         margin: 0 !important;
     }
-
-    /* 减少标题间距 */
     h1, h2, h3, h4, h5 {
         margin-top: 0.1rem !important;
         margin-bottom: 0.1rem !important;
         padding: 0 !important;
     }
-    h1 {
-        font-size: 1.2rem !important;
-    }
-    h3 {
-        font-size: 0.85rem !important;
-    }
-    h4 {
-        font-size: 0.75rem !important;
-    }
-    h5 {
-        font-size: 0.7rem !important;
-    }
-
-    /* 紧凑的expander */
-    .streamlit-expanderHeader {
-        padding: 0.1rem 0.3rem !important;
-        font-size: 0.7rem !important;
-    }
-    .streamlit-expanderContent {
-        padding: 0.1rem 0.3rem !important;
-    }
-
-    /* 紧凑的caption */
-    .caption, .stCaption {
-        font-size: 0.65rem !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-    /* 减少sidebar间距 */
-    section[data-testid="stSidebar"] > div {
-        padding-top: 0.3rem !important;
-        padding-left: 0.3rem !important;
-        padding-right: 0.3rem !important;
-    }
-    section[data-testid="stSidebar"] label {
-        font-size: 0.75rem !important;
-    }
-
-    /* 紧凑的进度条 */
-    .stProgress {
-        margin: 0 !important;
-    }
-    .stProgress > div {
-        height: 0.5rem !important;
-    }
-
-    /* 紧凑的info/alert */
-    .stAlert {
-        padding: 0.2rem 0.5rem !important;
-        margin: 0.1rem 0 !important;
-        font-size: 0.75rem !important;
-    }
-
-    /* 紧凑的下载按钮 */
-    .stDownloadButton button {
-        padding: 0.1rem 0.3rem !important;
-        font-size: 0.7rem !important;
-        min-height: 1.4rem !important;
-    }
-
-    /* 减少分割线间距 */
-    hr {
-        margin: 0.2rem 0 !important;
-    }
-
-    /* 注释文本框全宽显示 */
+    h1 { font-size: 1.2rem !important; }
+    h3 { font-size: 0.85rem !important; }
+    h4 { font-size: 0.75rem !important; }
+    h5 { font-size: 0.7rem !important; }
     .comment-box {
         width: 100% !important;
         background-color: #f8f9fa;
@@ -270,8 +203,6 @@ st.markdown("""
         word-wrap: break-word !important;
         white-space: pre-wrap !important;
     }
-    
-    /* 原文显示区域 */
     .original-text {
         width: 100% !important;
         padding: 6px 10px !important;
@@ -284,8 +215,6 @@ st.markdown("""
         word-wrap: break-word !important;
         white-space: pre-wrap !important;
     }
-
-    /* 顶部状态栏样式 - 单行显示，字体加大 */
     .top-status {
         background: #f8f9fa;
         padding: 6px 12px;
@@ -300,8 +229,6 @@ st.markdown("""
         z-index: 100;
         position: relative;
     }
-    
-    /* 状态项 - 字体加大 */
     .status-item {
         display: inline-flex;
         align-items: center;
@@ -320,8 +247,6 @@ st.markdown("""
         font-size: 0.95rem;
         color: #212529;
     }
-    
-    /* 价格信息在状态栏中 - 字体加大 */
     .price-inline {
         display: inline-flex;
         gap: 6px;
@@ -345,17 +270,35 @@ st.markdown("""
         font-size: 0.75rem !important;
         margin-right: 2px;
     }
-    
-    /* 注释状态标识 - 加大 */
-    .has-comment {
-        color: #28a745;
-        font-weight: 700;
-        font-size: 1rem;
+    .has-comment { color: #28a745; font-weight: 700; font-size: 1rem; }
+    .no-comment { color: #dc3545; font-weight: 700; font-size: 1rem; }
+    .save-section {
+        background: #e8f4fd;
+        padding: 10px;
+        border-radius: 4px;
+        border: 1px solid #b8d4e8;
+        margin: 10px 0;
     }
-    .no-comment {
-        color: #dc3545;
-        font-weight: 700;
-        font-size: 1rem;
+    .price-info {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 2px 0;
+        margin: 0;
+        align-items: center;
+    }
+    .price-item {
+        background: #f8f9fa;
+        padding: 1px 6px;
+        border-radius: 3px;
+        border-left: 2px solid #dee2e6;
+        font-size: 0.7rem !important;
+        line-height: 1.4;
+    }
+    .price-item strong {
+        font-weight: 600;
+        color: #495057;
+        font-size: 0.65rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -363,10 +306,21 @@ st.markdown("""
 # 页面标题
 st.title("📚 Al Brooks 逐K训练器")
 
+# ---------------- 初始化session_state ----------------
+if "all_data" not in st.session_state:
+    st.session_state.all_data = None
+if "all_cases" not in st.session_state:
+    st.session_state.all_cases = None
+if "comments" not in st.session_state:
+    st.session_state.comments = {}
+if "data_source" not in st.session_state:
+    st.session_state.data_source = None
+if "current_case_id" not in st.session_state:
+    st.session_state.current_case_id = None
+
 # ---------------- 侧边栏配置 ----------------
 with st.sidebar:
     st.markdown("### ⚙️ 配置")
-    # API密钥输入框
     st.session_state["api_key"] = st.text_input(
         "API Key",
         type="password",
@@ -374,36 +328,102 @@ with st.sidebar:
         placeholder="输入API Key",
         label_visibility="collapsed"
     )
+    
+    st.markdown("---")
+    st.markdown("### 📂 数据源")
+    
+    data_source = st.radio(
+        "选择数据源",
+        ["上传文件", "在线URL"],
+        index=0 if st.session_state.data_source is None else (0 if st.session_state.data_source == "upload" else 1),
+        label_visibility="collapsed"
+    )
+    
+    if data_source == "上传文件":
+        st.session_state.data_source = "upload"
+        file = st.file_uploader("📂 上传JSON", type=["json"], label_visibility="collapsed")
+        
+        if file:
+            all_data, all_cases = load_all_cases(file)
+            st.session_state.all_data = all_data
+            st.session_state.all_cases = all_cases
+            st.success("✅ 数据加载成功")
+    else:
+        st.session_state.data_source = "url"
+        st.markdown("### 🔗 在线数据")
+        
+        default_url = st.text_input(
+            "JSON URL",
+            value=st.session_state.get("json_url", ""),
+            placeholder="输入JSON文件的在线URL",
+            label_visibility="collapsed"
+        )
+        
+        if default_url:
+            st.session_state.json_url = default_url
+            if st.button("📥 加载在线数据", use_container_width=True, type="primary"):
+                with st.spinner("正在加载在线数据..."):
+                    data = load_data_from_url(default_url)
+                    if data:
+                        all_data, all_cases = load_all_cases_from_data(data)
+                        st.session_state.all_data = all_data
+                        st.session_state.all_cases = all_cases
+                        st.success("✅ 数据加载成功！")
+                        st.rerun()
 
-    # 文件上传
-    file = st.file_uploader("📂 上传JSON", type=["json"], label_visibility="collapsed")
+# 使用session_state中的数据
+all_data = st.session_state.all_data
+all_cases = st.session_state.all_cases
 
-# 如果没有上传文件，显示提示信息
-if not file:
-    st.info("👈 请上传 JSON 文件")
+if all_data is None or all_cases is None or not all_cases:
+    st.info("👈 请上传JSON文件或输入在线URL加载数据")
     st.stop()
 
-# 加载所有案例数据
-all_data, all_cases = load_all_cases(file)
+# ---------------- GitHub保存配置 ----------------
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 💾 保存设置")
+    
+    save_method = st.selectbox(
+        "保存方式",
+        ["下载到本地", "保存到GitHub"],
+        index=0
+    )
+    
+    if save_method == "保存到GitHub":
+        st.markdown("#### GitHub配置")
+        github_owner = st.text_input("仓库所有者", value=st.session_state.get("github_owner", ""))
+        github_repo = st.text_input("仓库名称", value=st.session_state.get("github_repo", ""))
+        github_path = st.text_input("文件路径", value=st.session_state.get("github_path", "cases_database.json"))
+        github_token = st.text_input(
+            "GitHub Token",
+            type="password",
+            value=st.session_state.get("github_token", ""),
+            help="需要repo权限的Personal Access Token"
+        )
+        
+        st.session_state.github_owner = github_owner
+        st.session_state.github_repo = github_repo
+        st.session_state.github_path = github_path
+        st.session_state.github_token = github_token
 
-if not all_cases:
-    st.error("未找到案例数据")
-    st.stop()
-
-# 获取所有案例的ID和标题，用于下拉选择
+# 获取所有案例的ID和标题
 case_options = {}
 for case in all_cases:
     case_id = case.get("case_id", "unknown")
     title = case.get("title", f"案例 {case_id}")
     case_options[f"{case_id}"] = case_id
 
-# 案例选择下拉框
+# 案例选择
 selected_case_id = st.sidebar.selectbox(
     "📋 案例",
     options=list(case_options.keys()),
     index=0,
     label_visibility="collapsed"
 )
+
+# 更新当前案例ID
+st.session_state.current_case_id = selected_case_id
 
 # 加载选中的案例
 case, bars_df, comments = load_case_by_id(all_cases, selected_case_id)
@@ -412,7 +432,11 @@ if case is None:
     st.error(f"未找到案例 ID: {selected_case_id}")
     st.stop()
 
-# 过滤编号0的空K线（盘前数据）
+# 更新comments到session_state
+st.session_state.comments = comments
+st.session_state.current_comments = comments
+
+# 过滤编号0的空K线
 if 0 in bars_df["bar"].values:
     bar_zero = bars_df[bars_df["bar"] == 0]
     if bar_zero.empty or (bar_zero["open"].isna().all() and bar_zero["close"].isna().all()):
@@ -424,7 +448,7 @@ total_bars = len(all_bars)
 max_bar = max(all_bars) if len(all_bars) > 0 else 0
 min_bar = min(all_bars) if len(all_bars) > 0 else 0
 
-# 计算价格范围用于图表
+# 计算价格范围
 price_min = bars_df["low"].min()
 price_max = bars_df["high"].max()
 price_padding = (price_max - price_min) * 0.05
@@ -432,7 +456,7 @@ price_padding = (price_max - price_min) * 0.05
 # 获取有注释的K线列表
 comment_bars = sorted([int(x) for x in comments.keys() if int(x) > 0])
 
-# 获取第一根正数K线（排除0号）
+# 获取第一根正数K线
 first_positive_bar = min([b for b in all_bars if b > 0]) if any(b > 0 for b in all_bars) else None
 
 # 初始化当前K线状态
@@ -443,7 +467,6 @@ if "current_bar" not in st.session_state or st.session_state.get("case_id") != s
         st.session_state.current_bar = max_bar if max_bar > 0 else 1
     st.session_state.case_id = selected_case_id
 
-# 确保当前K线在有效范围内
 if st.session_state.current_bar > max_bar:
     st.session_state.current_bar = first_positive_bar if first_positive_bar is not None else max_bar
 
@@ -451,12 +474,10 @@ if first_positive_bar is not None and st.session_state.current_bar < first_posit
     st.session_state.current_bar = first_positive_bar
 
 # =======================
-# 顶部状态栏 - 单行显示所有信息（加大字体）
+# 顶部状态栏
 # =======================
-# 获取当前K线数据
 current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
 
-# 构建价格信息HTML
 price_html = ""
 if not current_row.empty:
     row = current_row.iloc[0]
@@ -465,7 +486,6 @@ if not current_row.empty:
     is_up = row['close'] > row['open']
     color_style = '#28a745' if is_up else '#dc3545'
     
-    # 使用字符串拼接构建价格信息
     price_html = (
         '<span class="price-inline-item"><strong>开</strong>' + f'{row["open"]:.2f}' + '</span>'
         '<span class="price-inline-item"><strong>高</strong>' + f'{row["high"]:.2f}' + '</span>'
@@ -476,11 +496,9 @@ if not current_row.empty:
         '</span>'
     )
 
-# 检查是否有注释
 has_comment = str(st.session_state.current_bar) in comments and st.session_state.current_bar > 0
 comment_status = '<span class="has-comment">✅</span>' if has_comment else '<span class="no-comment">❌</span>'
 
-# 单行显示所有状态
 status_html = f'''
 <div class="top-status">
     <span class="status-item">
@@ -513,17 +531,13 @@ status_html = f'''
 '''
 
 st.markdown(status_html, unsafe_allow_html=True)
-
-# 添加一个明显的间距
 st.markdown("<br><br>", unsafe_allow_html=True)
 
 # =======================
-# K线图表绘制
+# K线图表
 # =======================
-# 只显示到当前K线的数据
 visible = bars_df[bars_df["bar"] <= st.session_state.current_bar]
 
-# 获取当前K线的颜色
 current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
 if not current_row.empty:
     row = current_row.iloc[0]
@@ -532,14 +546,11 @@ if not current_row.empty:
 else:
     color = "blue"
 
-# 创建图表
 fig = go.Figure()
 
-# 分离阳线和阴线绘制
 up_bars = visible[visible["close"] > visible["open"]]
 down_bars = visible[visible["close"] <= visible["open"]]
 
-# 绘制阳线（红色）
 if not up_bars.empty:
     fig.add_trace(go.Candlestick(
         x=up_bars["bar"],
@@ -553,7 +564,6 @@ if not up_bars.empty:
         decreasing_line_color="red"
     ))
 
-# 绘制阴线（黑色）
 if not down_bars.empty:
     fig.add_trace(go.Candlestick(
         x=down_bars["bar"],
@@ -567,7 +577,6 @@ if not down_bars.empty:
         decreasing_line_color="black"
     ))
 
-# 如果有盘前数据（负编号），添加分隔线
 if min_bar < 0:
     fig.add_vline(x=0.5, line_width=1, line_color="gray", line_dash="dot")
     fig.add_annotation(
@@ -578,7 +587,6 @@ if min_bar < 0:
         font=dict(size=8, color="gray")
     )
 
-# 标记当前K线位置
 fig.add_vline(
     x=st.session_state.current_bar,
     line_width=2,
@@ -586,7 +594,6 @@ fig.add_vline(
     line_dash="dash"
 )
 
-# 如果当前K线有注释，在图表上显示简短标记
 bar_str = str(st.session_state.current_bar)
 if bar_str in comments and st.session_state.current_bar > 0:
     trans = comments[bar_str].get("translation", "")
@@ -607,11 +614,9 @@ if bar_str in comments and st.session_state.current_bar > 0:
                 font=dict(size=8)
             )
 
-# 设置图表范围
 x_min = min_bar - 0.5 if min_bar < 0 else -0.5
 x_max = max_bar + 0.5
 
-# 更新图表布局
 fig.update_layout(
     height=350,
     margin=dict(l=3, r=3, t=20, b=15),
@@ -661,7 +666,6 @@ with ctrl_cols[2]:
             st.rerun()
 
 with ctrl_cols[3]:
-    # 进度条显示当前位置
     progress = (current_idx + 1) / total if total > 0 else 0
     st.progress(progress, text=f"{current_idx + 1}/{total}")
 
@@ -672,54 +676,43 @@ with ctrl_cols[4]:
             st.rerun()
 
 with ctrl_cols[5]:
-    # 快速跳转到有注释的K线
     if positive_comment_bars := [b for b in comment_bars if b > 0]:
         if st.button("💬跳", help="跳转到有注释的K线"):
-            # 找下一个有注释的K线
             for b in positive_comment_bars:
                 if b > st.session_state.current_bar:
                     st.session_state.current_bar = b
                     st.rerun()
-            # 如果没有下一个，跳转到第一个
             st.session_state.current_bar = positive_comment_bars[0]
             st.rerun()
 
 # =======================
-# 下方信息面板 - 完整显示注释内容
+# 下方信息面板 - 注释内容
 # =======================
 
 st.markdown("---")
 
 bar_str = str(st.session_state.current_bar)
-
-# 判断当前K线是否有注释
 has_comment = st.session_state.current_bar > 0 and bar_str in comments
 
 if has_comment:
-    # 获取注释数据
     item = comments[bar_str]
     original_text = item.get("original", "")
     translation = item.get("translation", "")
     plain_text = item.get("plain", "")
     
-    # 显示Bar编号和原文
     st.markdown(f"### 📊 Bar {bar_str} 注释内容")
     
-    # 显示原文
     if original_text:
         st.markdown(f'<div class="original-text">📖 <b>原文:</b> {original_text}</div>', unsafe_allow_html=True)
     else:
         st.info("ℹ️ 此K线没有原文内容")
     
-    # 显示已有的翻译（如果有）
     if translation:
         st.markdown(f'<div class="comment-box">📝 <b>翻译:</b> {translation}</div>', unsafe_allow_html=True)
     
-    # 显示已有的白话解释（如果有）
     if plain_text:
         st.markdown(f'<div class="comment-box">💬 <b>白话:</b> {plain_text}</div>', unsafe_allow_html=True)
 
-    # AI功能按钮
     st.markdown("---")
     st.markdown("#### 🤖 AI辅助功能")
     ai_cols = st.columns([1, 1, 1, 0.5, 0.5])
@@ -730,12 +723,14 @@ if has_comment:
                 with st.spinner("AI正在翻译..."):
                     result = ai_translate(original_text)
                     st.session_state[f"trans_{bar_str}"] = result
-                    # 自动保存到comments
+                    # 直接更新comments
                     comments[bar_str]["translation"] = result
-                    for c in all_data["cases"]:
+                    # 更新到all_data
+                    for c in st.session_state.all_data["cases"]:
                         if str(c.get("case_id", "")) == str(selected_case_id):
                             c["comments"] = comments
                             break
+                    st.session_state.all_data_modified = True
                     st.rerun()
             else:
                 st.warning("没有原文可翻译")
@@ -756,41 +751,44 @@ if has_comment:
                 with st.spinner("AI正在改写..."):
                     result = ai_plain(original_text)
                     st.session_state[f"plain_{bar_str}"] = result
-                    # 自动保存到comments
+                    # 直接更新comments
                     comments[bar_str]["plain"] = result
-                    for c in all_data["cases"]:
+                    # 更新到all_data
+                    for c in st.session_state.all_data["cases"]:
                         if str(c.get("case_id", "")) == str(selected_case_id):
                             c["comments"] = comments
                             break
+                    st.session_state.all_data_modified = True
                     st.rerun()
             else:
                 st.warning("没有原文可改写")
     
     with ai_cols[3]:
-        if st.button("💾", key="save_btn", help="保存所有编辑", use_container_width=True):
-            # 从编辑框中获取内容并保存
+        if st.button("💾 保存", key="save_btn", use_container_width=True):
+            # 从编辑框获取内容
             trans_edit = st.session_state.get(f"trans_edit_{bar_str}", comments[bar_str].get("translation", ""))
             plain_edit = st.session_state.get(f"plain_edit_{bar_str}", comments[bar_str].get("plain", ""))
+            
+            # 更新comments
             comments[bar_str]["translation"] = trans_edit
             comments[bar_str]["plain"] = plain_edit
-            for c in all_data["cases"]:
+            
+            # 更新到all_data
+            for c in st.session_state.all_data["cases"]:
                 if str(c.get("case_id", "")) == str(selected_case_id):
                     c["comments"] = comments
                     break
-            st.success("✅ 已保存")
+            
+            st.session_state.all_data_modified = True
+            st.success("✅ 已保存到内存，请下载或保存到GitHub")
             st.rerun()
     
     with ai_cols[4]:
-        st.download_button(
-            "📥",
-            save_json(all_data),
-            file_name=f"albrooks_{selected_case_id}_updated.json",
-            mime="application/json",
-            use_container_width=True,
-            help="下载JSON"
-        )
+        # 显示修改状态
+        if st.session_state.get("all_data_modified", False):
+            st.info("📝 有未保存的修改")
 
-    # 显示AI生成的结果（如果有）
+    # 显示AI生成的结果
     ai_results = []
     if st.session_state.get(f"trans_{bar_str}"):
         ai_results.append(("翻译", st.session_state[f"trans_{bar_str}"]))
@@ -805,12 +803,10 @@ if has_comment:
         for label, content in ai_results:
             st.markdown(f'<div class="comment-box">💡 <b>{label}:</b> {content}</div>', unsafe_allow_html=True)
 
-    # 编辑区域
     st.markdown("---")
     st.markdown("#### ✏️ 编辑注释")
     edit_row = st.columns([2, 2])
     
-    # 获取当前编辑框的值，优先使用session_state
     trans_current = st.session_state.get(f"trans_edit_{bar_str}", comments[bar_str].get("translation", ""))
     plain_current = st.session_state.get(f"plain_edit_{bar_str}", comments[bar_str].get("plain", ""))
 
@@ -834,27 +830,108 @@ if has_comment:
             placeholder="在此编辑白话解释..."
         )
 
-    # 保存和下载按钮
-    col_save, col_download = st.columns([1, 1])
-    with col_save:
-        if st.button("💾 保存编辑", use_container_width=True):
-            trans_val = st.session_state.get(f"trans_edit_{bar_str}", comments[bar_str].get("translation", ""))
-            plain_val = st.session_state.get(f"plain_edit_{bar_str}", comments[bar_str].get("plain", ""))
-            comments[bar_str]["translation"] = trans_val
-            comments[bar_str]["plain"] = plain_val
-            for c in all_data["cases"]:
-                if str(c.get("case_id", "")) == str(selected_case_id):
-                    c["comments"] = comments
-                    break
-            st.success("✅ 已保存")
-            st.rerun()
-    
-    with col_download:
-        st.download_button(
-            "📥 下载JSON",
-            save_json(all_data),
-            file_name=f"albrooks_{selected_case_id}_updated.json",
-            mime="application/json",
-            use_container_width=True,
-            help="下载更新后的JSON文件"
-        )
+else:
+    current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
+    if not current_row.empty:
+        row = current_row.iloc[0]
+        st.markdown(f"##### Bar {bar_str} 价格信息")
+        
+        change = row['close'] - row['open']
+        change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
+        is_up = row['close'] > row['open']
+        
+        st.markdown(f"""
+        <div class="price-info">
+            <span class="price-item"><strong>开盘</strong> {row['open']:.2f}</span>
+            <span class="price-item"><strong>最高</strong> {row['high']:.2f}</span>
+            <span class="price-item"><strong>最低</strong> {row['low']:.2f}</span>
+            <span class="price-item"><strong>收盘</strong> {row['close']:.2f}</span>
+            <span class="price-item" style="border-left-color: {'#28a745' if is_up else '#dc3545'};">
+                <strong>涨跌</strong> 
+                {change:+.2f} 
+                ({change_pct:+.2f}%)
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+# =======================
+# 全局保存区域 - 在页面底部
+# =======================
+st.markdown("---")
+st.markdown("### 💾 保存数据")
+
+# 显示修改状态
+if st.session_state.get("all_data_modified", False):
+    st.warning("⚠️ 数据已修改，请下载或保存到GitHub")
+
+col_save1, col_save2, col_save3 = st.columns([1, 1, 2])
+
+with col_save1:
+    # 下载完整JSON - 使用最新的数据
+    download_data = st.session_state.all_data
+    st.download_button(
+        "📥 下载完整JSON",
+        save_json(download_data),
+        file_name=f"albrooks_complete_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        mime="application/json",
+        use_container_width=True,
+        help="下载所有案例数据（包含所有修改）",
+        key="download_complete"
+    )
+
+with col_save2:
+    # 下载当前案例
+    current_case_data = {
+        "case_id": selected_case_id,
+        "title": case.get("title", ""),
+        "date": case.get("date", ""),
+        "bars": case.get("bars", []),
+        "comments": comments
+    }
+    st.download_button(
+        "📥 下载当前案例",
+        json.dumps(current_case_data, ensure_ascii=False, indent=2),
+        file_name=f"case_{selected_case_id}_{datetime.now().strftime('%Y%m%d')}.json",
+        mime="application/json",
+        use_container_width=True,
+        help="仅下载当前案例（包含所有修改）",
+        key="download_case"
+    )
+
+with col_save3:
+    if save_method == "保存到GitHub":
+        if st.button("🚀 保存到GitHub", use_container_width=True, type="primary"):
+            if not st.session_state.github_token:
+                st.error("❌ 请提供GitHub Token")
+            elif not st.session_state.github_owner or not st.session_state.github_repo:
+                st.error("❌ 请提供GitHub仓库信息")
+            else:
+                with st.spinner("正在保存到GitHub..."):
+                    success, message = save_to_github(
+                        st.session_state.all_data,
+                        st.session_state.github_owner,
+                        st.session_state.github_repo,
+                        st.session_state.github_path,
+                        st.session_state.github_token,
+                        f"更新案例 {selected_case_id} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                    if success:
+                        st.success(message)
+                        st.session_state.all_data_modified = False
+                        st.rerun()
+                    else:
+                        st.error(message)
+    else:
+        st.info("💡 选择'下载到本地'方式保存数据，点击上方按钮下载")
+
+# 显示当前数据状态
+with st.expander("📊 数据状态"):
+    st.json({
+        "案例数量": len(all_cases),
+        "当前案例ID": selected_case_id,
+        "当前K线": st.session_state.current_bar,
+        "有注释": has_comment,
+        "数据已修改": st.session_state.get("all_data_modified", False),
+        "数据源": st.session_state.data_source,
+        "最后更新": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
