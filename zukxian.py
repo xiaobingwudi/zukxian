@@ -142,12 +142,12 @@ def save_json(data):
 
 # --------------------- UI 界面模块 ---------------------
 
-# CSS样式
+# CSS样式 - 加大顶部状态栏字体
 st.markdown("""
 <style>
     /* 全局紧凑 */
     .block-container {
-        padding-top: 0.3rem !important;
+        padding-top: 0.5rem !important;
         padding-bottom: 0.1rem !important;
         padding-left: 0.2rem !important;
         padding-right: 0.2rem !important;
@@ -157,26 +157,6 @@ st.markdown("""
     /* 减少元素间距 */
     .element-container {
         margin-bottom: 0.05rem !important;
-    }
-
-    /* 紧凑的metric - 改为inline显示 */
-    [data-testid="metric-container"] {
-        padding: 0.02rem 0.1rem !important;
-        margin: 0 !important;
-        background: none !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        gap: 2px !important;
-    }
-    [data-testid="metric-container"] label {
-        font-size: 0.55rem !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    [data-testid="metric-container"] div {
-        font-size: 0.7rem !important;
-        margin: 0 !important;
-        padding: 0 !important;
     }
 
     /* 紧凑的按钮 */
@@ -235,7 +215,7 @@ st.markdown("""
 
     /* 紧凑的caption */
     .caption, .stCaption {
-        font-size: 0.55rem !important;
+        font-size: 0.65rem !important;
         margin: 0 !important;
         padding: 0 !important;
     }
@@ -305,68 +285,77 @@ st.markdown("""
         white-space: pre-wrap !important;
     }
 
-    /* 顶部状态栏样式 - 单行显示 */
+    /* 顶部状态栏样式 - 单行显示，字体加大 */
     .top-status {
         background: #f8f9fa;
-        padding: 2px 8px;
+        padding: 6px 12px;
         border-radius: 4px;
-        margin-bottom: 4px;
-        border: 1px solid #e9ecef;
+        margin-bottom: 8px;
+        border: 2px solid #dee2e6;
         display: flex;
         align-items: center;
         flex-wrap: wrap;
-        gap: 4px 8px;
+        gap: 6px 12px;
+        min-height: 36px;
+        z-index: 100;
+        position: relative;
     }
     
-    /* 状态项 */
+    /* 状态项 - 字体加大 */
     .status-item {
         display: inline-flex;
         align-items: center;
-        gap: 2px;
-        font-size: 0.65rem;
+        gap: 3px;
+        font-size: 0.9rem;
         white-space: nowrap;
-        padding: 1px 4px;
+        padding: 2px 6px;
     }
     .status-item .label {
         color: #6c757d;
-        font-size: 0.55rem;
+        font-size: 0.75rem;
+        font-weight: 500;
     }
     .status-item .value {
-        font-weight: 600;
-        font-size: 0.7rem;
+        font-weight: 700;
+        font-size: 0.95rem;
+        color: #212529;
     }
     
-    /* 价格信息在状态栏中 */
+    /* 价格信息在状态栏中 - 字体加大 */
     .price-inline {
         display: inline-flex;
-        gap: 4px;
+        gap: 6px;
         flex-wrap: wrap;
         align-items: center;
-        font-size: 0.6rem !important;
+        font-size: 0.85rem !important;
         margin-left: 4px;
     }
     .price-inline-item {
         background: white;
-        padding: 0px 4px;
-        border-radius: 2px;
+        padding: 2px 8px;
+        border-radius: 3px;
         border-left: 2px solid #dee2e6;
-        font-size: 0.6rem !important;
+        font-size: 0.85rem !important;
         white-space: nowrap;
+        font-weight: 500;
     }
     .price-inline-item strong {
-        font-weight: 600;
+        font-weight: 700;
         color: #495057;
-        font-size: 0.55rem !important;
+        font-size: 0.75rem !important;
+        margin-right: 2px;
     }
     
-    /* 注释状态标识 */
+    /* 注释状态标识 - 加大 */
     .has-comment {
         color: #28a745;
-        font-weight: 600;
+        font-weight: 700;
+        font-size: 1rem;
     }
     .no-comment {
         color: #dc3545;
-        font-weight: 600;
+        font-weight: 700;
+        font-size: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -462,12 +451,12 @@ if first_positive_bar is not None and st.session_state.current_bar < first_posit
     st.session_state.current_bar = first_positive_bar
 
 # =======================
-# 顶部状态栏 - 单行显示所有信息
+# 顶部状态栏 - 单行显示所有信息（加大字体）
 # =======================
 # 获取当前K线数据
 current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
 
-# 构建价格信息HTML - 修复字符串拼接问题
+# 构建价格信息HTML
 price_html = ""
 if not current_row.empty:
     row = current_row.iloc[0]
@@ -514,7 +503,7 @@ status_html = f'''
         <span class="label">📅</span>
         <span class="value">{case.get('date', '')}</span>
     </span>
-    <span class="status-item" style="flex:1;">
+    <span class="status-item" style="flex:0;">
         <span class="label">{case.get('title', '')}</span>
     </span>
     <span class="price-inline">
@@ -525,8 +514,8 @@ status_html = f'''
 
 st.markdown(status_html, unsafe_allow_html=True)
 
-# 添加一个小间距
-st.markdown("<br>", unsafe_allow_html=True)
+# 添加一个明显的间距
+st.markdown("<br><br>", unsafe_allow_html=True)
 
 # =======================
 # K线图表绘制
