@@ -466,29 +466,33 @@ if first_positive_bar is not None and st.session_state.current_bar < first_posit
 # =======================
 # 获取当前K线数据
 current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
-current_price_info = ""
+
+# 构建价格信息HTML - 修复字符串拼接问题
+price_html = ""
 if not current_row.empty:
     row = current_row.iloc[0]
     change = row['close'] - row['open']
     change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
     is_up = row['close'] > row['open']
     color_style = '#28a745' if is_up else '#dc3545'
-    current_price_info = f"""
-    <span class="price-inline-item"><strong>开</strong>{row['open']:.2f}</span>
-    <span class="price-inline-item"><strong>高</strong>{row['high']:.2f}</span>
-    <span class="price-inline-item"><strong>低</strong>{row['low']:.2f}</span>
-    <span class="price-inline-item"><strong>收</strong>{row['close']:.2f}</span>
-    <span class="price-inline-item" style="border-left-color: {color_style};">
-        <strong>涨跌</strong> {change:+.2f}({change_pct:+.2f}%)
-    </span>
-    """
+    
+    # 使用字符串拼接构建价格信息
+    price_html = (
+        '<span class="price-inline-item"><strong>开</strong>' + f'{row["open"]:.2f}' + '</span>'
+        '<span class="price-inline-item"><strong>高</strong>' + f'{row["high"]:.2f}' + '</span>'
+        '<span class="price-inline-item"><strong>低</strong>' + f'{row["low"]:.2f}' + '</span>'
+        '<span class="price-inline-item"><strong>收</strong>' + f'{row["close"]:.2f}' + '</span>'
+        '<span class="price-inline-item" style="border-left-color: ' + color_style + ';">'
+        '<strong>涨跌</strong> ' + f'{change:+.2f}' + '(' + f'{change_pct:+.2f}' + '%)'
+        '</span>'
+    )
 
 # 检查是否有注释
 has_comment = str(st.session_state.current_bar) in comments and st.session_state.current_bar > 0
 comment_status = '<span class="has-comment">✅</span>' if has_comment else '<span class="no-comment">❌</span>'
 
 # 单行显示所有状态
-st.markdown(f'''
+status_html = f'''
 <div class="top-status">
     <span class="status-item">
         <span class="label">Bar</span>
@@ -514,10 +518,12 @@ st.markdown(f'''
         <span class="label">{case.get('title', '')}</span>
     </span>
     <span class="price-inline">
-        {current_price_info}
+        {price_html}
     </span>
 </div>
-''', unsafe_allow_html=True)
+'''
+
+st.markdown(status_html, unsafe_allow_html=True)
 
 # 添加一个小间距
 st.markdown("<br>", unsafe_allow_html=True)
