@@ -159,17 +159,24 @@ st.markdown("""
         margin-bottom: 0.05rem !important;
     }
 
-    /* 紧凑的metric */
+    /* 紧凑的metric - 改为inline显示 */
     [data-testid="metric-container"] {
-        padding: 0.05rem 0.2rem !important;
+        padding: 0.02rem 0.1rem !important;
         margin: 0 !important;
         background: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 2px !important;
     }
     [data-testid="metric-container"] label {
         font-size: 0.55rem !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
     [data-testid="metric-container"] div {
-        font-size: 0.75rem !important;
+        font-size: 0.7rem !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     /* 紧凑的按钮 */
@@ -194,7 +201,7 @@ st.markdown("""
 
     /* 紧凑的列间距 */
     .row-widget.stColumns {
-        gap: 0.05rem !important;
+        gap: 0.02rem !important;
         margin: 0 !important;
     }
 
@@ -228,7 +235,7 @@ st.markdown("""
 
     /* 紧凑的caption */
     .caption, .stCaption {
-        font-size: 0.6rem !important;
+        font-size: 0.55rem !important;
         margin: 0 !important;
         padding: 0 !important;
     }
@@ -298,35 +305,68 @@ st.markdown("""
         white-space: pre-wrap !important;
     }
 
-    /* 顶部状态栏样式 */
+    /* 顶部状态栏样式 - 单行显示 */
     .top-status {
         background: #f8f9fa;
-        padding: 4px 8px;
+        padding: 2px 8px;
         border-radius: 4px;
         margin-bottom: 4px;
         border: 1px solid #e9ecef;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px 8px;
+    }
+    
+    /* 状态项 */
+    .status-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        font-size: 0.65rem;
+        white-space: nowrap;
+        padding: 1px 4px;
+    }
+    .status-item .label {
+        color: #6c757d;
+        font-size: 0.55rem;
+    }
+    .status-item .value {
+        font-weight: 600;
+        font-size: 0.7rem;
     }
     
     /* 价格信息在状态栏中 */
     .price-inline {
-        display: flex;
-        gap: 6px;
+        display: inline-flex;
+        gap: 4px;
         flex-wrap: wrap;
         align-items: center;
-        font-size: 0.65rem !important;
+        font-size: 0.6rem !important;
+        margin-left: 4px;
     }
     .price-inline-item {
         background: white;
-        padding: 0px 5px;
+        padding: 0px 4px;
         border-radius: 2px;
         border-left: 2px solid #dee2e6;
-        font-size: 0.65rem !important;
+        font-size: 0.6rem !important;
         white-space: nowrap;
     }
     .price-inline-item strong {
         font-weight: 600;
         color: #495057;
-        font-size: 0.6rem !important;
+        font-size: 0.55rem !important;
+    }
+    
+    /* 注释状态标识 */
+    .has-comment {
+        color: #28a745;
+        font-weight: 600;
+    }
+    .no-comment {
+        color: #dc3545;
+        font-weight: 600;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -422,10 +462,8 @@ if first_positive_bar is not None and st.session_state.current_bar < first_posit
     st.session_state.current_bar = first_positive_bar
 
 # =======================
-# 顶部状态栏 - 显示当前K线信息和价格
+# 顶部状态栏 - 单行显示所有信息
 # =======================
-st.markdown('<div class="top-status">', unsafe_allow_html=True)
-
 # 获取当前K线数据
 current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
 current_price_info = ""
@@ -436,39 +474,50 @@ if not current_row.empty:
     is_up = row['close'] > row['open']
     color_style = '#28a745' if is_up else '#dc3545'
     current_price_info = f"""
-    <span class="price-inline-item"><strong>开盘</strong> {row['open']:.2f}</span>
-    <span class="price-inline-item"><strong>最高</strong> {row['high']:.2f}</span>
-    <span class="price-inline-item"><strong>最低</strong> {row['low']:.2f}</span>
-    <span class="price-inline-item"><strong>收盘</strong> {row['close']:.2f}</span>
+    <span class="price-inline-item"><strong>开</strong>{row['open']:.2f}</span>
+    <span class="price-inline-item"><strong>高</strong>{row['high']:.2f}</span>
+    <span class="price-inline-item"><strong>低</strong>{row['low']:.2f}</span>
+    <span class="price-inline-item"><strong>收</strong>{row['close']:.2f}</span>
     <span class="price-inline-item" style="border-left-color: {color_style};">
-        <strong>涨跌</strong> {change:+.2f} ({change_pct:+.2f}%)
+        <strong>涨跌</strong> {change:+.2f}({change_pct:+.2f}%)
     </span>
     """
 
-# 使用更细的列来容纳更多信息
-top_cols = st.columns([0.4, 0.4, 0.4, 0.4, 4.5])
+# 检查是否有注释
+has_comment = str(st.session_state.current_bar) in comments and st.session_state.current_bar > 0
+comment_status = '<span class="has-comment">✅</span>' if has_comment else '<span class="no-comment">❌</span>'
 
-with top_cols[0]:
-    st.metric("Bar", st.session_state.current_bar)
-
-with top_cols[1]:
-    st.metric("总数", total_bars)
-
-with top_cols[2]:
-    has_comment = str(st.session_state.current_bar) in comments and st.session_state.current_bar > 0
-    st.metric("注释", "✅" if has_comment else "❌")
-
-with top_cols[3]:
-    st.caption(f"ID: {selected_case_id}")
-
-with top_cols[4]:
-    # 显示价格信息
-    if current_price_info:
-        st.markdown(f'<div class="price-inline">{current_price_info}</div>', unsafe_allow_html=True)
-    else:
-        st.caption("📊 无价格数据")
-
-st.markdown('</div>', unsafe_allow_html=True)
+# 单行显示所有状态
+st.markdown(f'''
+<div class="top-status">
+    <span class="status-item">
+        <span class="label">Bar</span>
+        <span class="value">{st.session_state.current_bar}</span>
+    </span>
+    <span class="status-item">
+        <span class="label">总数</span>
+        <span class="value">{total_bars}</span>
+    </span>
+    <span class="status-item">
+        <span class="label">注释</span>
+        <span class="value">{comment_status}</span>
+    </span>
+    <span class="status-item">
+        <span class="label">ID</span>
+        <span class="value">{selected_case_id}</span>
+    </span>
+    <span class="status-item">
+        <span class="label">📅</span>
+        <span class="value">{case.get('date', '')}</span>
+    </span>
+    <span class="status-item" style="flex:1;">
+        <span class="label">{case.get('title', '')}</span>
+    </span>
+    <span class="price-inline">
+        {current_price_info}
+    </span>
+</div>
+''', unsafe_allow_html=True)
 
 # 添加一个小间距
 st.markdown("<br>", unsafe_allow_html=True)
