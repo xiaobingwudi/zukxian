@@ -1,6 +1,4 @@
-抱歉，代码中有语法错误。我给您完整的代码：
 
-```python
 # Al Brooks AI Study Tool (single-file Streamlit version)
 # 使用Streamlit Secrets管理所有配置
 
@@ -1149,5 +1147,5 @@ st.json({
     "translation": comments.get(bar_str, {}).get("translation", ""),
     "plain": comments.get(bar_str, {}).get("plain", "")
 })
-```
+
 
