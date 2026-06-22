@@ -1,3 +1,6 @@
+抱歉，代码中有语法错误。我给您完整的代码：
+
+```python
 # Al Brooks AI Study Tool (single-file Streamlit version)
 # 使用Streamlit Secrets管理所有配置
 
@@ -618,3 +621,534 @@ if all_data is None or all_cases is None or not all_cases:
         
         # 默认JSON URL（可选）
         JSON_URL = "https://raw.githubusercontent.com/your_username/your_repo/main/cases_database.json"
+        ```
+        
+        ### 获取GitHub Token
+        1. 访问 https://github.com/settings/tokens
+        2. 点击 "Generate new token (classic)"
+        3. 选择 `repo` 权限
+        4. 生成并复制Token
+        
+        ### 获取DeepSeek API Key
+        1. 访问 https://platform.deepseek.com/
+        2. 注册并获取API Key
+        """)
+    st.stop()
+
+# 获取所有案例的ID和标题
+case_options = {}
+for case in all_cases:
+    case_id = case.get("case_id", "unknown")
+    title = case.get("title", f"案例 {case_id}")
+    case_options[f"{case_id}"] = case_id
+
+# 案例选择
+selected_case_id = st.sidebar.selectbox(
+    "📋 案例",
+    options=list(case_options.keys()),
+    index=0,
+    label_visibility="collapsed"
+)
+
+# 更新当前案例ID
+st.session_state.current_case_id = selected_case_id
+
+# 加载选中的案例
+case, bars_df, comments = load_case_by_id(all_cases, selected_case_id)
+
+if case is None:
+    st.error(f"未找到案例 ID: {selected_case_id}")
+    st.stop()
+
+# 过滤编号0的空K线
+if 0 in bars_df["bar"].values:
+    bar_zero = bars_df[bars_df["bar"] == 0]
+    if bar_zero.empty or (bar_zero["open"].isna().all() and bar_zero["close"].isna().all()):
+        bars_df = bars_df[bars_df["bar"] != 0]
+
+# 获取所有K线编号
+all_bars = sorted(bars_df["bar"].unique())
+total_bars = len(all_bars)
+max_bar = max(all_bars) if len(all_bars) > 0 else 0
+min_bar = min(all_bars) if len(all_bars) > 0 else 0
+
+# 计算价格范围
+price_min = bars_df["low"].min()
+price_max = bars_df["high"].max()
+price_padding = (price_max - price_min) * 0.05
+
+# 获取有注释的K线列表
+comment_bars = sorted([int(x) for x in comments.keys() if int(x) > 0])
+
+# 获取第一根正数K线
+first_positive_bar = min([b for b in all_bars if b > 0]) if any(b > 0 for b in all_bars) else None
+
+# 初始化当前K线状态
+if "current_bar" not in st.session_state or st.session_state.get("case_id") != selected_case_id:
+    if first_positive_bar is not None:
+        st.session_state.current_bar = first_positive_bar
+    else:
+        st.session_state.current_bar = max_bar if max_bar > 0 else 1
+    st.session_state.case_id = selected_case_id
+
+if st.session_state.current_bar > max_bar:
+    st.session_state.current_bar = first_positive_bar if first_positive_bar is not None else max_bar
+
+if first_positive_bar is not None and st.session_state.current_bar < first_positive_bar:
+    st.session_state.current_bar = first_positive_bar
+
+# =======================
+# 显示保存状态
+# =======================
+if st.session_state.save_message:
+    st.markdown(f'<div class="save-success">{st.session_state.save_message}</div>', unsafe_allow_html=True)
+    st.session_state.save_message = ""
+
+if st.session_state.all_data_modified:
+    st.markdown('<div class="save-status">⚠️ 数据已修改，请点击"💾 保存到GitHub"保存</div>', unsafe_allow_html=True)
+
+# =======================
+# 顶部状态栏
+# =======================
+current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
+
+price_html = ""
+if not current_row.empty:
+    row = current_row.iloc[0]
+    change = row['close'] - row['open']
+    change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
+    is_up = row['close'] > row['open']
+    color_style = '#28a745' if is_up else '#dc3545'
+    
+    price_html = (
+        '<span class="price-inline-item"><strong>开</strong>' + f'{row["open"]:.2f}' + '</span>'
+        '<span class="price-inline-item"><strong>高</strong>' + f'{row["high"]:.2f}' + '</span>'
+        '<span class="price-inline-item"><strong>低</strong>' + f'{row["low"]:.2f}' + '</span>'
+        '<span class="price-inline-item"><strong>收</strong>' + f'{row["close"]:.2f}' + '</span>'
+        '<span class="price-inline-item" style="border-left-color: ' + color_style + ';">'
+        '<strong>涨跌</strong> ' + f'{change:+.2f}' + '(' + f'{change_pct:+.2f}' + '%)'
+        '</span>'
+    )
+
+bar_str = str(st.session_state.current_bar)
+has_comment = st.session_state.current_bar > 0 and bar_str in comments
+comment_status = '<span class="has-comment">✅</span>' if has_comment else '<span class="no-comment">❌</span>'
+
+status_html = f'''
+<div class="top-status">
+    <span class="status-item">
+        <span class="label">Bar</span>
+        <span class="value">{st.session_state.current_bar}</span>
+    </span>
+    <span class="status-item">
+        <span class="label">总数</span>
+        <span class="value">{total_bars}</span>
+    </span>
+    <span class="status-item">
+        <span class="label">注释</span>
+        <span class="value">{comment_status}</span>
+    </span>
+    <span class="status-item">
+        <span class="label">ID</span>
+        <span class="value">{selected_case_id}</span>
+    </span>
+    <span class="status-item">
+        <span class="label">📅</span>
+        <span class="value">{case.get('date', '')}</span>
+    </span>
+    <span class="status-item" style="flex:0;">
+        <span class="label">{case.get('title', '')}</span>
+    </span>
+    <span class="price-inline">
+        {price_html}
+    </span>
+</div>
+'''
+
+st.markdown(status_html, unsafe_allow_html=True)
+st.markdown("<br><br>", unsafe_allow_html=True)
+
+# =======================
+# K线图表
+# =======================
+visible = bars_df[bars_df["bar"] <= st.session_state.current_bar]
+
+current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
+if not current_row.empty:
+    row = current_row.iloc[0]
+    is_up = row["close"] > row["open"]
+    color = "red" if is_up else "black"
+else:
+    color = "blue"
+
+fig = go.Figure()
+
+up_bars = visible[visible["close"] > visible["open"]]
+down_bars = visible[visible["close"] <= visible["open"]]
+
+if not up_bars.empty:
+    fig.add_trace(go.Candlestick(
+        x=up_bars["bar"],
+        open=up_bars["open"],
+        high=up_bars["high"],
+        low=up_bars["low"],
+        close=up_bars["close"],
+        name="阳线",
+        showlegend=False,
+        increasing_line_color="red",
+        decreasing_line_color="red"
+    ))
+
+if not down_bars.empty:
+    fig.add_trace(go.Candlestick(
+        x=down_bars["bar"],
+        open=down_bars["open"],
+        high=down_bars["high"],
+        low=down_bars["low"],
+        close=down_bars["close"],
+        name="阴线",
+        showlegend=False,
+        increasing_line_color="black",
+        decreasing_line_color="black"
+    ))
+
+if min_bar < 0:
+    fig.add_vline(x=0.5, line_width=1, line_color="gray", line_dash="dot")
+    fig.add_annotation(
+        x=0.5,
+        y=price_max * 0.95,
+        text="盘前 | 正式",
+        showarrow=False,
+        font=dict(size=8, color="gray")
+    )
+
+fig.add_vline(
+    x=st.session_state.current_bar,
+    line_width=2,
+    line_color=color,
+    line_dash="dash"
+)
+
+if bar_str in comments and st.session_state.current_bar > 0:
+    trans = comments[bar_str].get("translation", "")
+    if trans:
+        trans_preview = trans[:20] + "..." if len(trans) > 20 else trans
+        current_k = visible[visible["bar"] == st.session_state.current_bar]
+        if not current_k.empty:
+            y_pos = current_k["high"].max() * 1.02
+            fig.add_annotation(
+                x=st.session_state.current_bar,
+                y=y_pos,
+                text=f"📝 {trans_preview}",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1,
+                arrowwidth=2,
+                arrowcolor="orange",
+                font=dict(size=8)
+            )
+
+x_min = min_bar - 0.5 if min_bar < 0 else -0.5
+x_max = max_bar + 0.5
+
+fig.update_layout(
+    height=350,
+    margin=dict(l=3, r=3, t=20, b=15),
+    xaxis_rangeslider_visible=False,
+    showlegend=False,
+    xaxis=dict(
+        tickmode='linear',
+        dtick=max(1, total_bars // 20),
+        gridcolor='lightgray',
+        gridwidth=0.5,
+        range=[x_min, x_max],
+        tickfont=dict(size=8)
+    ),
+    yaxis=dict(
+        range=[price_min - price_padding, price_max + price_padding],
+        gridcolor='lightgray',
+        gridwidth=0.5,
+        tickfont=dict(size=8)
+    ),
+    plot_bgcolor='white',
+    paper_bgcolor='white'
+)
+
+st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+# -------- K线导航控制条 --------
+current_idx = all_bars.index(st.session_state.current_bar) if st.session_state.current_bar in all_bars else 0
+total = len(all_bars)
+
+ctrl_cols = st.columns([0.5, 0.5, 0.5, 3, 0.5, 0.5])
+
+with ctrl_cols[0]:
+    if st.button("⏮", help="第一根"):
+        st.session_state.current_bar = all_bars[0]
+        st.rerun()
+
+with ctrl_cols[1]:
+    if st.button("◀", help="上一根"):
+        if current_idx > 0:
+            st.session_state.current_bar = all_bars[current_idx - 1]
+            st.rerun()
+
+with ctrl_cols[2]:
+    if st.button("▶", help="下一根"):
+        if current_idx < total - 1:
+            st.session_state.current_bar = all_bars[current_idx + 1]
+            st.rerun()
+
+with ctrl_cols[3]:
+    progress = (current_idx + 1) / total if total > 0 else 0
+    st.progress(progress, text=f"{current_idx + 1}/{total}")
+
+with ctrl_cols[4]:
+    if st.button("⏭", help="最后一根"):
+        if current_idx < total - 1:
+            st.session_state.current_bar = all_bars[-1]
+            st.rerun()
+
+with ctrl_cols[5]:
+    if positive_comment_bars := [b for b in comment_bars if b > 0]:
+        if st.button("💬跳", help="跳转到有注释的K线"):
+            for b in positive_comment_bars:
+                if b > st.session_state.current_bar:
+                    st.session_state.current_bar = b
+                    st.rerun()
+            st.session_state.current_bar = positive_comment_bars[0]
+            st.rerun()
+
+# =======================
+# 下方信息面板 - 注释内容
+# =======================
+
+st.markdown("---")
+
+if has_comment:
+    item = comments[bar_str]
+    original_text = item.get("original", "")
+    translation = item.get("translation", "")
+    plain_text = item.get("plain", "")
+    
+    st.markdown(f"### 📊 Bar {bar_str} 注释内容")
+    
+    if original_text:
+        st.markdown(f'<div class="original-text">📖 <b>原文:</b> {original_text}</div>', unsafe_allow_html=True)
+    else:
+        st.info("ℹ️ 此K线没有原文内容")
+    
+    if translation:
+        st.markdown(f'<div class="comment-box">📝 <b>翻译:</b> {translation}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="comment-box" style="border-left-color: #6c757d; color: #6c757d;">📝 <b>翻译:</b> (空)</div>', unsafe_allow_html=True)
+    
+    if plain_text:
+        st.markdown(f'<div class="comment-box">💬 <b>白话:</b> {plain_text}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="comment-box" style="border-left-color: #6c757d; color: #6c757d;">💬 <b>白话:</b> (空)</div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("#### ✏️ 编辑注释")
+    edit_row = st.columns([2, 2])
+    
+    trans_current = st.session_state.get(f"trans_edit_{bar_str}", comments[bar_str].get("translation", ""))
+    plain_current = st.session_state.get(f"plain_edit_{bar_str}", comments[bar_str].get("plain", ""))
+
+    with edit_row[0]:
+        st.text_area(
+            "翻译编辑",
+            value=trans_current,
+            height=80,
+            key=f"trans_edit_{bar_str}",
+            label_visibility="collapsed",
+            placeholder="在此编辑翻译内容..."
+        )
+
+    with edit_row[1]:
+        st.text_area(
+            "白话编辑",
+            value=plain_current,
+            height=80,
+            key=f"plain_edit_{bar_str}",
+            label_visibility="collapsed",
+            placeholder="在此编辑白话解释..."
+        )
+
+    # 保存按钮
+    st.markdown("---")
+    st.markdown("#### 💾 保存操作")
+    
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+    
+    with col_btn1:
+        if st.button("💾 保存到内存", use_container_width=True, type="primary"):
+            # 从编辑框获取内容
+            trans_edit = st.session_state.get(f"trans_edit_{bar_str}", "")
+            plain_edit = st.session_state.get(f"plain_edit_{bar_str}", "")
+            
+            # 更新comments
+            if bar_str not in comments:
+                comments[bar_str] = {}
+            comments[bar_str]["translation"] = trans_edit
+            comments[bar_str]["plain"] = plain_edit
+            
+            # 更新到all_data
+            for c in st.session_state.all_data["cases"]:
+                if str(c.get("case_id", "")) == str(selected_case_id):
+                    c["comments"] = comments
+                    break
+            
+            st.session_state.all_data_modified = True
+            st.session_state.save_message = "✅ 已保存到内存！"
+            st.rerun()
+    
+    with col_btn2:
+        if st.button("🌐 AI翻译", use_container_width=True):
+            if original_text:
+                with st.spinner("AI正在翻译..."):
+                    result = ai_translate(original_text)
+                    if bar_str not in comments:
+                        comments[bar_str] = {}
+                    comments[bar_str]["translation"] = result
+                    
+                    for c in st.session_state.all_data["cases"]:
+                        if str(c.get("case_id", "")) == str(selected_case_id):
+                            c["comments"] = comments
+                            break
+                    
+                    st.session_state.all_data_modified = True
+                    st.session_state[f"trans_edit_{bar_str}"] = result
+                    st.session_state.save_message = "✅ AI翻译完成"
+                    st.rerun()
+            else:
+                st.warning("没有原文可翻译")
+    
+    with col_btn3:
+        if st.button("🗣️ AI白话", use_container_width=True):
+            if original_text:
+                with st.spinner("AI正在改写..."):
+                    result = ai_plain(original_text)
+                    if bar_str not in comments:
+                        comments[bar_str] = {}
+                    comments[bar_str]["plain"] = result
+                    
+                    for c in st.session_state.all_data["cases"]:
+                        if str(c.get("case_id", "")) == str(selected_case_id):
+                            c["comments"] = comments
+                            break
+                    
+                    st.session_state.all_data_modified = True
+                    st.session_state[f"plain_edit_{bar_str}"] = result
+                    st.session_state.save_message = "✅ AI白话完成"
+                    st.rerun()
+            else:
+                st.warning("没有原文可改写")
+
+else:
+    current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
+    if not current_row.empty:
+        row = current_row.iloc[0]
+        st.markdown(f"##### Bar {bar_str} 价格信息")
+        
+        change = row['close'] - row['open']
+        change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
+        is_up = row['close'] > row['open']
+        
+        st.markdown(f"""
+        <div class="price-info">
+            <span class="price-item"><strong>开盘</strong> {row['open']:.2f}</span>
+            <span class="price-item"><strong>最高</strong> {row['high']:.2f}</span>
+            <span class="price-item"><strong>最低</strong> {row['low']:.2f}</span>
+            <span class="price-item"><strong>收盘</strong> {row['close']:.2f}</span>
+            <span class="price-item" style="border-left-color: {'#28a745' if is_up else '#dc3545'};">
+                <strong>涨跌</strong> 
+                {change:+.2f} 
+                ({change_pct:+.2f}%)
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+# =======================
+# 保存到GitHub - 在页面底部
+# =======================
+st.markdown("---")
+st.markdown("### 🚀 保存到GitHub")
+
+# 显示当前数据预览
+with st.expander("📊 查看要保存的数据"):
+    st.json({
+        "case_id": selected_case_id,
+        "bar": bar_str,
+        "translation": comments.get(bar_str, {}).get("translation", ""),
+        "plain": comments.get(bar_str, {}).get("plain", ""),
+        "total_cases": len(all_cases)
+    })
+
+col_save1, col_save2 = st.columns([2, 1])
+
+with col_save1:
+    github_config = get_github_config()
+    if st.button("💾 保存到GitHub", use_container_width=True, type="primary"):
+        if not github_config["token"]:
+            st.error("❌ GitHub Token未配置（请在Secrets中设置GITHUB_TOKEN）")
+        elif not github_config["owner"] or not github_config["repo"]:
+            st.error("❌ GitHub配置不完整（请在Secrets中设置GITHUB_OWNER和GITHUB_REPO）")
+        else:
+            with st.spinner("正在保存到GitHub..."):
+                content = save_json(st.session_state.all_data)
+                success, message = github_write_file(
+                    github_config["owner"],
+                    github_config["repo"],
+                    github_config["path"],
+                    content,
+                    github_config["token"],
+                    f"更新案例 {selected_case_id} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                    github_config["branch"]
+                )
+                if success:
+                    st.success(message)
+                    st.session_state.all_data_modified = False
+                    st.session_state.save_message = "✅ 成功保存到GitHub！"
+                    st.rerun()
+                else:
+                    st.error(message)
+
+with col_save2:
+    # 下载JSON作为备选
+    json_str = save_json(st.session_state.all_data)
+    st.download_button(
+        "📥 下载JSON备份",
+        json_str,
+        file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        mime="application/json",
+        use_container_width=True,
+        help="下载JSON备份（如果GitHub保存失败）"
+    )
+
+# 显示修改状态和文件信息
+col_info1, col_info2, col_info3 = st.columns(3)
+with col_info1:
+    if st.session_state.all_data_modified:
+        st.info("💡 数据已修改，请点击 '💾 保存到GitHub' 保存")
+    else:
+        st.success("✅ 数据已保存")
+        
+with col_info2:
+    github_config = get_github_config()
+    st.caption(f"📁 文件: {github_config['path']}")
+    
+with col_info3:
+    st.caption(f"📂 分支: {github_config['branch']}")
+
+# 显示当前注释内容
+st.markdown("---")
+st.markdown("### 📝 当前K线注释")
+st.json({
+    "bar": bar_str,
+    "translation": comments.get(bar_str, {}).get("translation", ""),
+    "plain": comments.get(bar_str, {}).get("plain", "")
+})
+```
+
+这个完整代码已经修复了语法错误。您可以直接复制使用。
