@@ -596,29 +596,25 @@ with st.sidebar:
 all_data = st.session_state.all_data
 all_cases = st.session_state.all_cases
 
+# 如果没有数据，显示提示但不停止应用
 if all_data is None or all_cases is None or not all_cases:
-    st.info("👈 请从GitHub读取、上传文件或加载在线数据")
+    st.warning("⚠️ 请从GitHub读取、上传文件或加载在线数据")
     
     # 显示配置信息
     with st.expander("🔧 配置说明"):
         st.markdown("""
         ### 如何配置Streamlit Secrets
         
-        在项目根目录创建 `.streamlit/secrets.toml` 文件：
+        在Streamlit Cloud的Settings -> Secrets中添加以下配置：
         
         ```toml
-        # DeepSeek API Key
-        DEEPSEEK_API_KEY = "your_deepseek_api_key_here"
-        
-        # GitHub配置
-        GITHUB_TOKEN = "your_github_token_here"
-        GITHUB_OWNER = "your_username"
-        GITHUB_REPO = "your_repo_name"
+        DEEPSEEK_API_KEY = "sk-你的DeepSeek密钥"
+        GITHUB_TOKEN = "github_pat_你的GitHubToken"
+        GITHUB_OWNER = "xiaobingwudi"
+        GITHUB_REPO = "zukxian"
         GITHUB_PATH = "cases_database.json"
         GITHUB_BRANCH = "main"
-        
-        # 默认JSON URL（可选）
-        JSON_URL = "https://raw.githubusercontent.com/your_username/your_repo/main/cases_database.json"
+        JSON_URL = "https://raw.githubusercontent.com/xiaobingwudi/zukxian/main/cases_database.json"
         ```
         
         ### 获取GitHub Token
