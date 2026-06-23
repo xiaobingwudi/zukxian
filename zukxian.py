@@ -1090,15 +1090,13 @@ st.json({
     "translation": comments.get(bar_str, {}).get("translation", ""),
     "plain": comments.get(bar_str, {}).get("plain", "")
 })
-```
 
----
 
-## JSON 数据格式说明
 
-您的 `cases_database.json` 中，每个案例可以增加一个 `image_url` 字段：
 
-```json
+## JSON 数据格式说明您的 `cases_database.json` 中，每个案例可以增加一个 `image_url` 字段：
+
+
 {
   "cases": [
     {
