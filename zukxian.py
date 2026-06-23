@@ -17,34 +17,60 @@ import base64
 st.set_page_config(page_title="Al Brooks AI Study Tool", layout="wide")
 
 
-# --------------------- 配置管理模块 ---------------------
+# --------------------- 配置管理模块（修改版） ---------------------
 
-def get_secret(key, default=None):
-    """
-    从Streamlit Secrets获取配置
-    优先从secrets读取，如果没有则从session_state读取
-    """
-    try:
-        # 尝试从secrets读取
-        value = st.secrets.get(key)
-        if value is not None:
-            return value
-    except:
-        pass
-    
-    # 如果secrets没有，从session_state读取
-    return st.session_state.get(key, default)
-
-
-def get_github_config():
-    """获取GitHub配置"""
+def get_data_source_config():
+    """获取数据源配置 - 支持独立的数据仓库"""
+    # 数据仓库配置（可以跟主程序是不同仓库）
     return {
-        "owner": get_secret("GITHUB_OWNER", ""),
-        "repo": get_secret("GITHUB_REPO", ""),
-        "path": get_secret("GITHUB_PATH", "cases_database.json"),
+        "owner": get_secret("DATA_REPO_OWNER", get_secret("GITHUB_OWNER", "xiaobingwudi")),
+        "repo": get_secret("DATA_REPO_NAME", get_secret("GITHUB_REPO", "private-data")),
+        "path": get_secret("DATA_FILE_PATH", "cases_database.json"),
         "token": get_secret("GITHUB_TOKEN", ""),
-        "branch": get_secret("GITHUB_BRANCH", "main")
+        "branch": get_secret("DATA_REPO_BRANCH", "main")
     }
+
+def load_cases_from_private_repo():
+    """从私有仓库加载数据"""
+    config = get_data_source_config()
+    
+    if not config["token"]:
+        return None, "❌ GitHub Token未配置"
+    
+    success, content, sha, message = github_read_file(
+        config["owner"],
+        config["repo"],
+        config["path"],
+        config["token"],
+        config["branch"]
+    )
+    
+    if success:
+        try:
+            data = json.loads(content)
+            return data, "✅ 数据加载成功"
+        except json.JSONDecodeError:
+            return None, "❌ 数据格式错误"
+    else:
+        return None, f"❌ {message}"
+
+# 在加载数据时使用
+def load_data():
+    """主加载函数"""
+    # 优先从私有仓库加载
+    data, message = load_cases_from_private_repo()
+    if data:
+        return data
+    
+    # 如果私有仓库失败，尝试从公开URL加载（如果有配置）
+    json_url = get_json_url()
+    if json_url:
+        data = load_data_from_url(json_url)
+        if data:
+            return data
+    
+    # 都失败则返回空
+    return {"cases": []}
 
 
 def get_api_key():
