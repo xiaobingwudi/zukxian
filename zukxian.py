@@ -1,6 +1,6 @@
 
 # Al Brooks AI Study Tool (single-file Streamlit version)
-# 使用Streamlit Secrets管理所有配置
+# 支持从私有仓库加载数据，主程序公开
 
 import json
 import os
@@ -17,60 +17,39 @@ import base64
 st.set_page_config(page_title="Al Brooks AI Study Tool", layout="wide")
 
 
-# --------------------- 配置管理模块（修改版） ---------------------
+# --------------------- 配置管理模块 ---------------------
 
-def get_data_source_config():
-    """获取数据源配置 - 支持独立的数据仓库"""
-    # 数据仓库配置（可以跟主程序是不同仓库）
+def get_secret(key, default=None):
+    """
+    从Streamlit Secrets获取配置
+    优先从secrets读取，如果没有则从session_state读取
+    """
+    try:
+        value = st.secrets.get(key)
+        if value is not None:
+            return value
+    except:
+        pass
+    return st.session_state.get(key, default)
+
+
+def get_github_config():
+    """获取GitHub配置"""
     return {
-        "owner": get_secret("DATA_REPO_OWNER", get_secret("GITHUB_OWNER", "xiaobingwudi")),
-        "repo": get_secret("DATA_REPO_NAME", get_secret("GITHUB_REPO", "private-data")),
+        "token": get_secret("GITHUB_TOKEN", ""),
+        "branch": get_secret("GITHUB_BRANCH", "main")
+    }
+
+
+def get_data_repo_config():
+    """获取数据仓库配置（独立于主程序仓库）"""
+    return {
+        "owner": get_secret("DATA_REPO_OWNER", ""),
+        "repo": get_secret("DATA_REPO_NAME", ""),
         "path": get_secret("DATA_FILE_PATH", "cases_database.json"),
         "token": get_secret("GITHUB_TOKEN", ""),
         "branch": get_secret("DATA_REPO_BRANCH", "main")
     }
-
-def load_cases_from_private_repo():
-    """从私有仓库加载数据"""
-    config = get_data_source_config()
-    
-    if not config["token"]:
-        return None, "❌ GitHub Token未配置"
-    
-    success, content, sha, message = github_read_file(
-        config["owner"],
-        config["repo"],
-        config["path"],
-        config["token"],
-        config["branch"]
-    )
-    
-    if success:
-        try:
-            data = json.loads(content)
-            return data, "✅ 数据加载成功"
-        except json.JSONDecodeError:
-            return None, "❌ 数据格式错误"
-    else:
-        return None, f"❌ {message}"
-
-# 在加载数据时使用
-def load_data():
-    """主加载函数"""
-    # 优先从私有仓库加载
-    data, message = load_cases_from_private_repo()
-    if data:
-        return data
-    
-    # 如果私有仓库失败，尝试从公开URL加载（如果有配置）
-    json_url = get_json_url()
-    if json_url:
-        data = load_data_from_url(json_url)
-        if data:
-            return data
-    
-    # 都失败则返回空
-    return {"cases": []}
 
 
 def get_api_key():
@@ -135,7 +114,7 @@ def ai_plain(text):
 # --------------------- GitHub完整操作模块 ---------------------
 
 def github_read_file(owner, repo, path, token, branch="main"):
-    """从GitHub读取文件内容"""
+    """从GitHub读取文件内容（支持私有仓库）"""
     try:
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
         headers = {
@@ -151,6 +130,10 @@ def github_read_file(owner, repo, path, token, branch="main"):
             content = base64.b64decode(data["content"]).decode('utf-8')
             sha = data.get("sha")
             return True, content, sha, "读取成功"
+        elif response.status_code == 401:
+            return False, None, None, "Token无效或已过期"
+        elif response.status_code == 403:
+            return False, None, None, "Token权限不足，需要repo权限"
         elif response.status_code == 404:
             return False, None, None, "文件不存在"
         else:
@@ -160,7 +143,7 @@ def github_read_file(owner, repo, path, token, branch="main"):
 
 
 def github_write_file(owner, repo, path, content, token, commit_message=None, branch="main", sha=None):
-    """写入文件到GitHub"""
+    """写入文件到GitHub（支持私有仓库）"""
     if not token:
         return False, "❌ 请提供GitHub Token"
     
@@ -197,41 +180,6 @@ def github_write_file(owner, repo, path, content, token, commit_message=None, br
             
     except Exception as e:
         return False, f"❌ 保存失败: {str(e)}"
-
-
-def github_delete_file(owner, repo, path, token, commit_message=None, branch="main"):
-    """删除GitHub文件"""
-    if not token:
-        return False, "❌ 请提供GitHub Token"
-    
-    if not commit_message:
-        commit_message = f"删除文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    
-    try:
-        success, _, sha, _ = github_read_file(owner, repo, path, token, branch)
-        if not success:
-            return False, "文件不存在"
-        
-        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-        headers = {
-            "Authorization": f"token {token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        
-        payload = {
-            "message": commit_message,
-            "sha": sha,
-            "branch": branch
-        }
-        
-        response = requests.delete(url, headers=headers, json=payload)
-        
-        if response.status_code == 200:
-            return True, "✅ 文件删除成功"
-        else:
-            return False, f"❌ 删除失败: {response.status_code}"
-    except Exception as e:
-        return False, f"❌ 错误: {str(e)}"
 
 
 def load_data_from_url(url):
@@ -273,6 +221,56 @@ def load_case_by_id(cases, case_id):
 def save_json(data):
     txt = json.dumps(data, ensure_ascii=False, indent=2)
     return txt
+
+
+def load_from_private_repo():
+    """从私有仓库加载数据"""
+    config = get_data_repo_config()
+    
+    if not config["token"]:
+        return None, "❌ GitHub Token未配置"
+    
+    if not config["owner"] or not config["repo"]:
+        return None, "❌ 数据仓库配置不完整（请设置DATA_REPO_OWNER和DATA_REPO_NAME）"
+    
+    success, content, sha, message = github_read_file(
+        config["owner"],
+        config["repo"],
+        config["path"],
+        config["token"],
+        config["branch"]
+    )
+    
+    if success:
+        try:
+            data = json.loads(content)
+            return data, "✅ 数据加载成功"
+        except json.JSONDecodeError:
+            return None, "❌ 数据文件格式错误"
+    else:
+        return None, f"❌ {message}"
+
+
+def save_to_private_repo(data, commit_message=None):
+    """保存数据到私有仓库"""
+    config = get_data_repo_config()
+    
+    if not config["token"]:
+        return False, "❌ GitHub Token未配置"
+    
+    if not config["owner"] or not config["repo"]:
+        return False, "❌ 数据仓库配置不完整"
+    
+    content = save_json(data)
+    return github_write_file(
+        config["owner"],
+        config["repo"],
+        config["path"],
+        content,
+        config["token"],
+        commit_message or f"更新数据 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        config["branch"]
+    )
 
 
 # --------------------- UI 界面模块 ---------------------
@@ -480,179 +478,150 @@ with st.sidebar:
     
     # 检查GitHub配置
     github_config = get_github_config()
-    if github_config["token"] and github_config["owner"] and github_config["repo"]:
-        st.success(f"✅ GitHub 已配置: {github_config['owner']}/{github_config['repo']}")
+    data_repo_config = get_data_repo_config()
+    
+    if github_config["token"]:
+        st.success("✅ GitHub Token 已配置")
     else:
-        st.error("❌ GitHub 配置不完整")
+        st.error("❌ GitHub Token 未配置")
+    
+    if data_repo_config["owner"] and data_repo_config["repo"]:
+        st.success(f"✅ 数据仓库: {data_repo_config['owner']}/{data_repo_config['repo']}")
+    else:
+        st.error("❌ 数据仓库配置不完整")
     
     st.markdown("---")
     st.markdown("### 📂 数据源")
     
-    data_source = st.radio(
-        "选择数据源",
-        ["GitHub", "在线URL", "上传文件"],
-        index=0,
-        label_visibility="collapsed"
-    )
+    # 从私有仓库加载
+    st.markdown("#### 🔒 私有数据仓库")
+    st.caption(f"📁 {data_repo_config['path']}")
+    st.caption(f"📂 {data_repo_config['branch']}")
     
-    # 从GitHub加载
-    if data_source == "GitHub":
-        st.session_state.data_source = "github"
-        st.markdown("#### GitHub文件")
-        
-        github_config = get_github_config()
-        st.caption(f"📁 {github_config['path']}")
-        st.caption(f"📂 {github_config['branch']}")
-        
-        if st.button("📖 从GitHub读取", use_container_width=True, type="primary"):
-            if not github_config["token"]:
-                st.error("❌ GitHub Token未配置")
-            elif not github_config["owner"] or not github_config["repo"]:
-                st.error("❌ GitHub配置不完整")
-            else:
-                with st.spinner("正在读取文件..."):
-                    success, content, sha, message = github_read_file(
-                        github_config["owner"],
-                        github_config["repo"],
-                        github_config["path"],
-                        github_config["token"],
-                        github_config["branch"]
-                    )
-                    if success:
-                        try:
-                            data = json.loads(content)
-                            all_data, all_cases = load_all_cases_from_data(data)
-                            st.session_state.all_data = all_data
-                            st.session_state.all_cases = all_cases
-                            st.session_state.github_file_sha = sha
-                            st.session_state.all_data_modified = False
-                            st.success(f"✅ 读取成功！共 {len(all_cases)} 个案例")
-                            st.rerun()
-                        except json.JSONDecodeError:
-                            st.error("❌ 文件格式错误，不是有效的JSON")
-                    else:
-                        st.error(f"❌ {message}")
-        
-        # 创建新文件
-        if st.button("📝 创建新文件", use_container_width=True):
+    col_load1, col_load2 = st.columns(2)
+    with col_load1:
+        if st.button("📖 加载数据", use_container_width=True, type="primary"):
+            with st.spinner("正在从私有仓库加载数据..."):
+                data, message = load_from_private_repo()
+                if data:
+                    all_data, all_cases = load_all_cases_from_data(data)
+                    st.session_state.all_data = all_data
+                    st.session_state.all_cases = all_cases
+                    st.session_state.all_data_modified = False
+                    st.success(f"✅ 加载成功！共 {len(all_cases)} 个案例")
+                    st.rerun()
+                else:
+                    st.error(message)
+    
+    with col_load2:
+        if st.button("📝 创建数据文件", use_container_width=True):
             if not github_config["token"]:
                 st.error("❌ 请先配置GitHub Token")
             else:
                 empty_data = {"cases": []}
                 content = json.dumps(empty_data, ensure_ascii=False, indent=2)
                 success, message = github_write_file(
-                    github_config["owner"],
-                    github_config["repo"],
-                    github_config["path"],
+                    data_repo_config["owner"],
+                    data_repo_config["repo"],
+                    data_repo_config["path"],
                     content,
-                    github_config["token"],
-                    f"创建新文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    github_config["branch"]
+                    data_repo_config["token"],
+                    f"创建数据文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                    data_repo_config["branch"]
                 )
                 if success:
-                    st.success("✅ 新文件创建成功！请点击'从GitHub读取'加载")
+                    st.success("✅ 数据文件创建成功！请点击'加载数据'")
                     st.rerun()
                 else:
                     st.error(f"❌ {message}")
-        
-        # 删除文件
-        if st.button("🗑️ 删除文件", use_container_width=True):
-            if not github_config["token"]:
-                st.error("❌ 请先配置GitHub Token")
-            else:
-                if st.checkbox("确认删除", value=False):
-                    success, message = github_delete_file(
-                        github_config["owner"],
-                        github_config["repo"],
-                        github_config["path"],
-                        github_config["token"],
-                        f"删除文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                        github_config["branch"]
-                    )
-                    if success:
-                        st.success("✅ 文件删除成功")
-                        st.session_state.all_data = {"cases": []}
-                        st.session_state.all_cases = []
-                        st.rerun()
-                    else:
-                        st.error(f"❌ {message}")
-                else:
-                    st.warning("⚠️ 请勾选'确认删除'")
+    
+    st.markdown("---")
+    st.markdown("#### 📂 其他数据源")
     
     # 从在线URL加载
-    elif data_source == "在线URL":
-        st.session_state.data_source = "url"
-        st.markdown("#### 🔗 在线数据")
-        
-        default_url = get_json_url()
-        json_url = st.text_input(
-            "JSON URL",
-            value=st.session_state.get("json_url", default_url),
-            placeholder="输入JSON文件的在线URL",
-            label_visibility="collapsed"
-        )
-        
-        if json_url:
-            st.session_state.json_url = json_url
-            if st.button("📥 加载在线数据", use_container_width=True, type="primary"):
-                with st.spinner("正在加载在线数据..."):
-                    data = load_data_from_url(json_url)
-                    if data:
-                        all_data, all_cases = load_all_cases_from_data(data)
-                        st.session_state.all_data = all_data
-                        st.session_state.all_cases = all_cases
-                        st.session_state.all_data_modified = False
-                        st.success("✅ 数据加载成功！")
-                        st.rerun()
+    default_url = get_json_url()
+    json_url = st.text_input(
+        "在线URL",
+        value=st.session_state.get("json_url", default_url),
+        placeholder="输入JSON文件的在线URL",
+        label_visibility="collapsed"
+    )
+    
+    if json_url:
+        st.session_state.json_url = json_url
+        if st.button("📥 加载在线数据", use_container_width=True):
+            with st.spinner("正在加载在线数据..."):
+                data = load_data_from_url(json_url)
+                if data:
+                    all_data, all_cases = load_all_cases_from_data(data)
+                    st.session_state.all_data = all_data
+                    st.session_state.all_cases = all_cases
+                    st.session_state.all_data_modified = False
+                    st.success("✅ 数据加载成功！")
+                    st.rerun()
     
     # 上传文件
-    else:
-        st.session_state.data_source = "upload"
-        st.markdown("#### 📂 上传文件")
-        file = st.file_uploader("上传JSON文件", type=["json"], label_visibility="collapsed")
-        
-        if file:
-            all_data, all_cases = load_all_cases(file)
-            st.session_state.all_data = all_data
-            st.session_state.all_cases = all_cases
-            st.session_state.all_data_modified = False
-            st.success("✅ 数据加载成功")
+    st.markdown("#### 📂 上传文件")
+    file = st.file_uploader("上传JSON文件", type=["json"], label_visibility="collapsed")
+    
+    if file:
+        all_data, all_cases = load_all_cases(file)
+        st.session_state.all_data = all_data
+        st.session_state.all_cases = all_cases
+        st.session_state.all_data_modified = False
+        st.success("✅ 数据加载成功")
 
 # 使用session_state中的数据
 all_data = st.session_state.all_data
 all_cases = st.session_state.all_cases
 
-# 如果没有数据，显示提示但不停止应用
 if all_data is None or all_cases is None or not all_cases:
-    st.warning("⚠️ 请从GitHub读取、上传文件或加载在线数据")
+    st.warning("⚠️ 请加载数据")
     
-    # 显示配置信息
-    with st.expander("🔧 配置说明"):
+    with st.expander("📖 使用说明"):
         st.markdown("""
-        ### 如何配置Streamlit Secrets
-        
+        ### 如何配置
+            
         在Streamlit Cloud的Settings -> Secrets中添加以下配置：
         
         ```toml
+        # DeepSeek API Key
         DEEPSEEK_API_KEY = "sk-你的DeepSeek密钥"
-        GITHUB_TOKEN = "github_pat_你的GitHubToken"
-        GITHUB_OWNER = "xiaobingwudi"
-        GITHUB_REPO = "zukxian"
-        GITHUB_PATH = "cases_database.json"
-        GITHUB_BRANCH = "main"
-        JSON_URL = "https://raw.githubusercontent.com/xiaobingwudi/zukxian/main/cases_database.json"
+        
+        # GitHub Token（需要有repo权限）
+        GITHUB_TOKEN = "github_pat_你的Token"
+        
+        # 数据仓库配置（私有仓库）
+        DATA_REPO_OWNER = "xiaobingwudi"
+        DATA_REPO_NAME = "private-data"
+        DATA_FILE_PATH = "cases_database.json"
+        DATA_REPO_BRANCH = "main"
         ```
         
         ### 获取GitHub Token
         1. 访问 https://github.com/settings/tokens
         2. 点击 "Generate new token (classic)"
-        3. 选择 `repo` 权限
+        3. 勾选 `repo` 权限
         4. 生成并复制Token
         
-        ### 获取DeepSeek API Key
-        1. 访问 https://platform.deepseek.com/
-        2. 注册并获取API Key
+        ### 创建私有数据仓库
+        1. 在GitHub创建新仓库，设置为 **Private**
+        2. 上传 `cases_database.json` 文件
+        3. 在Secrets中配置仓库信息
         """)
+    
+    # 显示当前配置状态
+    with st.expander("🔧 当前配置状态"):
+        data_repo = get_data_repo_config()
+        st.json({
+            "DeepSeek API Key": "✅ 已配置" if get_api_key() else "❌ 未配置",
+            "GitHub Token": "✅ 已配置" if data_repo["token"] else "❌ 未配置",
+            "数据仓库": f"{data_repo['owner']}/{data_repo['repo']}" if data_repo["owner"] and data_repo["repo"] else "未配置",
+            "文件路径": data_repo["path"] or "未配置",
+            "分支": data_repo["branch"] or "未配置"
+        })
+    
+    st.info("💡 请在左侧边栏选择数据源并加载数据")
     st.stop()
 
 # 获取所有案例的ID和标题
@@ -725,7 +694,7 @@ if st.session_state.save_message:
     st.session_state.save_message = ""
 
 if st.session_state.all_data_modified:
-    st.markdown('<div class="save-status">⚠️ 数据已修改，请点击"💾 保存到GitHub"保存</div>', unsafe_allow_html=True)
+    st.markdown('<div class="save-status">⚠️ 数据已修改，请点击"💾 保存数据"保存</div>', unsafe_allow_html=True)
 
 # =======================
 # 顶部状态栏
@@ -1003,17 +972,14 @@ if has_comment:
     
     with col_btn1:
         if st.button("💾 保存到内存", use_container_width=True, type="primary"):
-            # 从编辑框获取内容
             trans_edit = st.session_state.get(f"trans_edit_{bar_str}", "")
             plain_edit = st.session_state.get(f"plain_edit_{bar_str}", "")
             
-            # 更新comments
             if bar_str not in comments:
                 comments[bar_str] = {}
             comments[bar_str]["translation"] = trans_edit
             comments[bar_str]["plain"] = plain_edit
             
-            # 更新到all_data
             for c in st.session_state.all_data["cases"]:
                 if str(c.get("case_id", "")) == str(selected_case_id):
                     c["comments"] = comments
@@ -1090,10 +1056,10 @@ else:
         """, unsafe_allow_html=True)
 
 # =======================
-# 保存到GitHub - 在页面底部
+# 保存到私有仓库 - 在页面底部
 # =======================
 st.markdown("---")
-st.markdown("### 🚀 保存到GitHub")
+st.markdown("### 💾 保存到私有仓库")
 
 # 显示当前数据预览
 with st.expander("📊 查看要保存的数据"):
@@ -1108,28 +1074,22 @@ with st.expander("📊 查看要保存的数据"):
 col_save1, col_save2 = st.columns([2, 1])
 
 with col_save1:
-    github_config = get_github_config()
-    if st.button("💾 保存到GitHub", use_container_width=True, type="primary"):
-        if not github_config["token"]:
-            st.error("❌ GitHub Token未配置（请在Secrets中设置GITHUB_TOKEN）")
-        elif not github_config["owner"] or not github_config["repo"]:
-            st.error("❌ GitHub配置不完整（请在Secrets中设置GITHUB_OWNER和GITHUB_REPO）")
+    if st.button("💾 保存到私有仓库", use_container_width=True, type="primary"):
+        data_repo = get_data_repo_config()
+        if not data_repo["token"]:
+            st.error("❌ GitHub Token未配置")
+        elif not data_repo["owner"] or not data_repo["repo"]:
+            st.error("❌ 数据仓库配置不完整")
         else:
-            with st.spinner("正在保存到GitHub..."):
-                content = save_json(st.session_state.all_data)
-                success, message = github_write_file(
-                    github_config["owner"],
-                    github_config["repo"],
-                    github_config["path"],
-                    content,
-                    github_config["token"],
-                    f"更新案例 {selected_case_id} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    github_config["branch"]
+            with st.spinner("正在保存到私有仓库..."):
+                success, message = save_to_private_repo(
+                    st.session_state.all_data,
+                    f"更新案例 {selected_case_id} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 )
                 if success:
                     st.success(message)
                     st.session_state.all_data_modified = False
-                    st.session_state.save_message = "✅ 成功保存到GitHub！"
+                    st.session_state.save_message = "✅ 成功保存到私有仓库！"
                     st.rerun()
                 else:
                     st.error(message)
@@ -1143,23 +1103,23 @@ with col_save2:
         file_name=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
         mime="application/json",
         use_container_width=True,
-        help="下载JSON备份（如果GitHub保存失败）"
+        help="下载JSON备份"
     )
 
 # 显示修改状态和文件信息
 col_info1, col_info2, col_info3 = st.columns(3)
 with col_info1:
     if st.session_state.all_data_modified:
-        st.info("💡 数据已修改，请点击 '💾 保存到GitHub' 保存")
+        st.info("💡 数据已修改，请点击 '💾 保存到私有仓库' 保存")
     else:
         st.success("✅ 数据已保存")
         
 with col_info2:
-    github_config = get_github_config()
-    st.caption(f"📁 文件: {github_config['path']}")
+    data_repo = get_data_repo_config()
+    st.caption(f"📁 文件: {data_repo['path']}")
     
 with col_info3:
-    st.caption(f"📂 分支: {github_config['branch']}")
+    st.caption(f"📂 分支: {data_repo['branch']}")
 
 # 显示当前注释内容
 st.markdown("---")
@@ -1169,5 +1129,3 @@ st.json({
     "translation": comments.get(bar_str, {}).get("translation", ""),
     "plain": comments.get(bar_str, {}).get("plain", "")
 })
-
-
