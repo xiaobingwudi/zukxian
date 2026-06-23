@@ -1,6 +1,6 @@
-
 # Al Brooks AI Study Tool (single-file Streamlit version)
 # 支持从私有仓库加载数据，主程序公开
+# 原图功能：左侧边栏独立按钮，浮窗显示
 
 import json
 import os
@@ -20,10 +20,6 @@ st.set_page_config(page_title="Al Brooks AI Study Tool", layout="wide")
 # --------------------- 配置管理模块 ---------------------
 
 def get_secret(key, default=None):
-    """
-    从Streamlit Secrets获取配置
-    优先从secrets读取，如果没有则从session_state读取
-    """
     try:
         value = st.secrets.get(key)
         if value is not None:
@@ -34,7 +30,6 @@ def get_secret(key, default=None):
 
 
 def get_github_config():
-    """获取GitHub配置"""
     return {
         "token": get_secret("GITHUB_TOKEN", ""),
         "branch": get_secret("GITHUB_BRANCH", "main")
@@ -42,7 +37,6 @@ def get_github_config():
 
 
 def get_data_repo_config():
-    """获取数据仓库配置（独立于主程序仓库）"""
     return {
         "owner": get_secret("DATA_REPO_OWNER", ""),
         "repo": get_secret("DATA_REPO_NAME", ""),
@@ -53,12 +47,10 @@ def get_data_repo_config():
 
 
 def get_api_key():
-    """获取DeepSeek API Key"""
     return get_secret("DEEPSEEK_API_KEY", "")
 
 
 def get_json_url():
-    """获取默认JSON URL"""
     return get_secret("JSON_URL", "")
 
 
@@ -75,7 +67,6 @@ def ask_ai(system_prompt, user_prompt):
     client = get_client()
     if not client:
         return "请配置 DeepSeek API Key（在Secrets中设置DEEPSEEK_API_KEY）"
-
     try:
         resp = client.chat.completions.create(
             model="deepseek-chat",
@@ -114,7 +105,6 @@ def ai_plain(text):
 # --------------------- GitHub完整操作模块 ---------------------
 
 def github_read_file(owner, repo, path, token, branch="main"):
-    """从GitHub读取文件内容（支持私有仓库）"""
     try:
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
         headers = {
@@ -122,9 +112,7 @@ def github_read_file(owner, repo, path, token, branch="main"):
             "Accept": "application/vnd.github.v3+json"
         }
         params = {"ref": branch} if branch else {}
-        
         response = requests.get(url, headers=headers, params=params)
-        
         if response.status_code == 200:
             data = response.json()
             content = base64.b64decode(data["content"]).decode('utf-8')
@@ -143,25 +131,19 @@ def github_read_file(owner, repo, path, token, branch="main"):
 
 
 def github_write_file(owner, repo, path, content, token, commit_message=None, branch="main", sha=None):
-    """写入文件到GitHub（支持私有仓库）"""
     if not token:
         return False, "❌ 请提供GitHub Token"
-    
     if not commit_message:
         commit_message = f"更新文件 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    
     try:
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
         headers = {
             "Authorization": f"token {token}",
             "Accept": "application/vnd.github.v3+json"
         }
-        
         if not sha:
             success, _, sha, _ = github_read_file(owner, repo, path, token, branch)
-        
         content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
-        
         payload = {
             "message": commit_message,
             "content": content_base64,
@@ -169,15 +151,12 @@ def github_write_file(owner, repo, path, content, token, commit_message=None, br
         }
         if sha:
             payload["sha"] = sha
-        
         response = requests.put(url, headers=headers, json=payload)
-        
         if response.status_code in [200, 201]:
             return True, "✅ 成功保存到GitHub！"
         else:
             error_msg = response.json().get("message", "未知错误")
             return False, f"❌ 保存失败: {error_msg}"
-            
     except Exception as e:
         return False, f"❌ 保存失败: {str(e)}"
 
@@ -214,8 +193,9 @@ def load_case_by_id(cases, case_id):
         if str(case.get("case_id", "")) == str(case_id):
             bars = pd.DataFrame(case.get("bars", []))
             comments = case.get("comments", {})
-            return case, bars, comments
-    return None, None, None
+            image_url = case.get("image_url", "")
+            return case, bars, comments, image_url
+    return None, None, None, None
 
 
 def save_json(data):
@@ -224,15 +204,11 @@ def save_json(data):
 
 
 def load_from_private_repo():
-    """从私有仓库加载数据"""
     config = get_data_repo_config()
-    
     if not config["token"]:
         return None, "❌ GitHub Token未配置"
-    
     if not config["owner"] or not config["repo"]:
         return None, "❌ 数据仓库配置不完整（请设置DATA_REPO_OWNER和DATA_REPO_NAME）"
-    
     success, content, sha, message = github_read_file(
         config["owner"],
         config["repo"],
@@ -240,7 +216,6 @@ def load_from_private_repo():
         config["token"],
         config["branch"]
     )
-    
     if success:
         try:
             data = json.loads(content)
@@ -252,15 +227,11 @@ def load_from_private_repo():
 
 
 def save_to_private_repo(data, commit_message=None):
-    """保存数据到私有仓库"""
     config = get_data_repo_config()
-    
     if not config["token"]:
         return False, "❌ GitHub Token未配置"
-    
     if not config["owner"] or not config["repo"]:
         return False, "❌ 数据仓库配置不完整"
-    
     content = save_json(data)
     return github_write_file(
         config["owner"],
@@ -275,7 +246,6 @@ def save_to_private_repo(data, commit_message=None):
 
 # --------------------- UI 界面模块 ---------------------
 
-# CSS样式
 st.markdown("""
 <style>
     .block-container {
@@ -443,11 +413,25 @@ st.markdown("""
         margin: 8px 0;
         font-size: 0.8rem;
     }
+    .image-popover {
+        max-width: 800px;
+        max-height: 600px;
+        overflow: auto;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        padding: 10px;
+    }
+    .image-popover img {
+        width: 100%;
+        height: auto;
+        object-fit: contain;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# 页面标题
 st.title("📚 Al Brooks 逐K训练器")
+
 
 # ---------------- 初始化session_state ----------------
 if "all_data" not in st.session_state:
@@ -464,27 +448,25 @@ if "save_message" not in st.session_state:
     st.session_state.save_message = ""
 if "github_file_sha" not in st.session_state:
     st.session_state.github_file_sha = None
+if "current_image_url" not in st.session_state:
+    st.session_state.current_image_url = ""
 
-# ---------------- 显示配置状态 ----------------
+
+# ---------------- 侧边栏 ----------------
 with st.sidebar:
     st.markdown("### 🔐 配置状态")
-    
-    # 检查API Key
     api_key = get_api_key()
     if api_key:
         st.success("✅ DeepSeek API Key 已配置")
     else:
         st.error("❌ DeepSeek API Key 未配置")
     
-    # 检查GitHub配置
     github_config = get_github_config()
     data_repo_config = get_data_repo_config()
-    
     if github_config["token"]:
         st.success("✅ GitHub Token 已配置")
     else:
         st.error("❌ GitHub Token 未配置")
-    
     if data_repo_config["owner"] and data_repo_config["repo"]:
         st.success(f"✅ 数据仓库: {data_repo_config['owner']}/{data_repo_config['repo']}")
     else:
@@ -492,8 +474,6 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### 📂 数据源")
-    
-    # 从私有仓库加载
     st.markdown("#### 🔒 私有数据仓库")
     st.caption(f"📁 {data_repo_config['path']}")
     st.caption(f"📂 {data_repo_config['branch']}")
@@ -537,8 +517,6 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("#### 📂 其他数据源")
-    
-    # 从在线URL加载
     default_url = get_json_url()
     json_url = st.text_input(
         "在线URL",
@@ -546,7 +524,6 @@ with st.sidebar:
         placeholder="输入JSON文件的在线URL",
         label_visibility="collapsed"
     )
-    
     if json_url:
         st.session_state.json_url = json_url
         if st.button("📥 加载在线数据", use_container_width=True):
@@ -560,57 +537,80 @@ with st.sidebar:
                     st.success("✅ 数据加载成功！")
                     st.rerun()
     
-    # 上传文件
     st.markdown("#### 📂 上传文件")
     file = st.file_uploader("上传JSON文件", type=["json"], label_visibility="collapsed")
-    
     if file:
         all_data, all_cases = load_all_cases(file)
         st.session_state.all_data = all_data
         st.session_state.all_cases = all_cases
         st.session_state.all_data_modified = False
         st.success("✅ 数据加载成功")
+    
+    st.markdown("---")
+    st.markdown("### 🖼️ 原图查看")
+    if st.session_state.current_image_url:
+        if st.button("📷 显示原图", use_container_width=True, type="primary"):
+            st.session_state.show_image = True
+            st.rerun()
+        # 浮窗显示图片
+        if st.session_state.get("show_image", False):
+            with st.popover("🖼️ 原图", use_container_width=False):
+                img_url = st.session_state.current_image_url
+                # 如果是GitHub私有仓库图片，通过token代理
+                if "github.com" in img_url and "/raw/" in img_url:
+                    try:
+                        token = get_github_config()["token"]
+                        headers = {"Authorization": f"token {token}"}
+                        response = requests.get(img_url, headers=headers)
+                        if response.status_code == 200:
+                            # 直接显示图片（使用base64编码）
+                            import base64 as b64
+                            img_data = b64.b64encode(response.content).decode()
+                            st.markdown(f'<div class="image-popover"><img src="data:image/png;base64,{img_data}" /></div>', unsafe_allow_html=True)
+                        else:
+                            st.error(f"❌ 加载图片失败: {response.status_code}")
+                    except Exception as e:
+                        st.error(f"❌ 加载图片失败: {str(e)}")
+                else:
+                    # 公开图片直接显示
+                    st.markdown(f'<div class="image-popover"><img src="{img_url}" /></div>', unsafe_allow_html=True)
+                
+                # 关闭按钮
+                if st.button("关闭", use_container_width=True):
+                    st.session_state.show_image = False
+                    st.rerun()
+    else:
+        st.info("当前案例没有关联图片")
 
-# 使用session_state中的数据
+
+# ---------------- 数据加载检查 ----------------
 all_data = st.session_state.all_data
 all_cases = st.session_state.all_cases
 
 if all_data is None or all_cases is None or not all_cases:
     st.warning("⚠️ 请加载数据")
-    
     with st.expander("📖 使用说明"):
         st.markdown("""
         ### 如何配置
-            
         在Streamlit Cloud的Settings -> Secrets中添加以下配置：
-        
         ```toml
-        # DeepSeek API Key
         DEEPSEEK_API_KEY = "sk-你的DeepSeek密钥"
-        
-        # GitHub Token（需要有repo权限）
         GITHUB_TOKEN = "github_pat_你的Token"
-        
-        # 数据仓库配置（私有仓库）
         DATA_REPO_OWNER = "xiaobingwudi"
         DATA_REPO_NAME = "private-data"
         DATA_FILE_PATH = "cases_database.json"
         DATA_REPO_BRANCH = "main"
         ```
-        
         ### 获取GitHub Token
         1. 访问 https://github.com/settings/tokens
         2. 点击 "Generate new token (classic)"
         3. 勾选 `repo` 权限
         4. 生成并复制Token
-        
         ### 创建私有数据仓库
         1. 在GitHub创建新仓库，设置为 **Private**
         2. 上传 `cases_database.json` 文件
         3. 在Secrets中配置仓库信息
         """)
-    
-    # 显示当前配置状态
     with st.expander("🔧 当前配置状态"):
         data_repo = get_data_repo_config()
         st.json({
@@ -620,59 +620,49 @@ if all_data is None or all_cases is None or not all_cases:
             "文件路径": data_repo["path"] or "未配置",
             "分支": data_repo["branch"] or "未配置"
         })
-    
     st.info("💡 请在左侧边栏选择数据源并加载数据")
     st.stop()
 
-# 获取所有案例的ID和标题
+
+# ---------------- 案例选择 ----------------
 case_options = {}
 for case in all_cases:
     case_id = case.get("case_id", "unknown")
     title = case.get("title", f"案例 {case_id}")
     case_options[f"{case_id}"] = case_id
 
-# 案例选择
 selected_case_id = st.sidebar.selectbox(
     "📋 案例",
     options=list(case_options.keys()),
     index=0,
     label_visibility="collapsed"
 )
-
-# 更新当前案例ID
 st.session_state.current_case_id = selected_case_id
 
-# 加载选中的案例
-case, bars_df, comments = load_case_by_id(all_cases, selected_case_id)
-
+case, bars_df, comments, image_url = load_case_by_id(all_cases, selected_case_id)
 if case is None:
     st.error(f"未找到案例 ID: {selected_case_id}")
     st.stop()
 
-# 过滤编号0的空K线
+st.session_state.current_image_url = image_url or ""
+
 if 0 in bars_df["bar"].values:
     bar_zero = bars_df[bars_df["bar"] == 0]
     if bar_zero.empty or (bar_zero["open"].isna().all() and bar_zero["close"].isna().all()):
         bars_df = bars_df[bars_df["bar"] != 0]
 
-# 获取所有K线编号
 all_bars = sorted(bars_df["bar"].unique())
 total_bars = len(all_bars)
 max_bar = max(all_bars) if len(all_bars) > 0 else 0
 min_bar = min(all_bars) if len(all_bars) > 0 else 0
 
-# 计算价格范围
 price_min = bars_df["low"].min()
 price_max = bars_df["high"].max()
 price_padding = (price_max - price_min) * 0.05
 
-# 获取有注释的K线列表
 comment_bars = sorted([int(x) for x in comments.keys() if int(x) > 0])
-
-# 获取第一根正数K线
 first_positive_bar = min([b for b in all_bars if b > 0]) if any(b > 0 for b in all_bars) else None
 
-# 初始化当前K线状态
 if "current_bar" not in st.session_state or st.session_state.get("case_id") != selected_case_id:
     if first_positive_bar is not None:
         st.session_state.current_bar = first_positive_bar
@@ -682,25 +672,20 @@ if "current_bar" not in st.session_state or st.session_state.get("case_id") != s
 
 if st.session_state.current_bar > max_bar:
     st.session_state.current_bar = first_positive_bar if first_positive_bar is not None else max_bar
-
 if first_positive_bar is not None and st.session_state.current_bar < first_positive_bar:
     st.session_state.current_bar = first_positive_bar
 
-# =======================
-# 显示保存状态
-# =======================
+
+# ---------------- 保存状态显示 ----------------
 if st.session_state.save_message:
     st.markdown(f'<div class="save-success">{st.session_state.save_message}</div>', unsafe_allow_html=True)
     st.session_state.save_message = ""
-
 if st.session_state.all_data_modified:
     st.markdown('<div class="save-status">⚠️ 数据已修改，请点击"💾 保存数据"保存</div>', unsafe_allow_html=True)
 
-# =======================
-# 顶部状态栏
-# =======================
-current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
 
+# ---------------- 顶部状态栏 ----------------
+current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
 price_html = ""
 if not current_row.empty:
     row = current_row.iloc[0]
@@ -708,7 +693,6 @@ if not current_row.empty:
     change_pct = (change / row['open'] * 100) if row['open'] != 0 else 0
     is_up = row['close'] > row['open']
     color_style = '#28a745' if is_up else '#dc3545'
-    
     price_html = (
         '<span class="price-inline-item"><strong>开</strong>' + f'{row["open"]:.2f}' + '</span>'
         '<span class="price-inline-item"><strong>高</strong>' + f'{row["high"]:.2f}' + '</span>'
@@ -753,15 +737,12 @@ status_html = f'''
     </span>
 </div>
 '''
-
 st.markdown(status_html, unsafe_allow_html=True)
 st.markdown("<br><br>", unsafe_allow_html=True)
 
-# =======================
-# K线图表
-# =======================
-visible = bars_df[bars_df["bar"] <= st.session_state.current_bar]
 
+# ---------------- K线图 ----------------
+visible = bars_df[bars_df["bar"] <= st.session_state.current_bar]
 current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
 if not current_row.empty:
     row = current_row.iloc[0]
@@ -771,7 +752,6 @@ else:
     color = "blue"
 
 fig = go.Figure()
-
 up_bars = visible[visible["close"] > visible["open"]]
 down_bars = visible[visible["close"] <= visible["open"]]
 
@@ -787,7 +767,6 @@ if not up_bars.empty:
         increasing_line_color="red",
         decreasing_line_color="red"
     ))
-
 if not down_bars.empty:
     fig.add_trace(go.Candlestick(
         x=down_bars["bar"],
@@ -839,7 +818,6 @@ if bar_str in comments and st.session_state.current_bar > 0:
 
 x_min = min_bar - 0.5 if min_bar < 0 else -0.5
 x_max = max_bar + 0.5
-
 fig.update_layout(
     height=350,
     margin=dict(l=3, r=3, t=20, b=15),
@@ -862,42 +840,35 @@ fig.update_layout(
     plot_bgcolor='white',
     paper_bgcolor='white'
 )
-
 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-# -------- K线导航控制条 --------
+
+# ---------------- K线导航控制条 ----------------
 current_idx = all_bars.index(st.session_state.current_bar) if st.session_state.current_bar in all_bars else 0
 total = len(all_bars)
-
 ctrl_cols = st.columns([0.5, 0.5, 0.5, 3, 0.5, 0.5])
-
 with ctrl_cols[0]:
     if st.button("⏮", help="第一根"):
         st.session_state.current_bar = all_bars[0]
         st.rerun()
-
 with ctrl_cols[1]:
     if st.button("◀", help="上一根"):
         if current_idx > 0:
             st.session_state.current_bar = all_bars[current_idx - 1]
             st.rerun()
-
 with ctrl_cols[2]:
     if st.button("▶", help="下一根"):
         if current_idx < total - 1:
             st.session_state.current_bar = all_bars[current_idx + 1]
             st.rerun()
-
 with ctrl_cols[3]:
     progress = (current_idx + 1) / total if total > 0 else 0
     st.progress(progress, text=f"{current_idx + 1}/{total}")
-
 with ctrl_cols[4]:
     if st.button("⏭", help="最后一根"):
         if current_idx < total - 1:
             st.session_state.current_bar = all_bars[-1]
             st.rerun()
-
 with ctrl_cols[5]:
     if positive_comment_bars := [b for b in comment_bars if b > 0]:
         if st.button("💬跳", help="跳转到有注释的K线"):
@@ -908,10 +879,8 @@ with ctrl_cols[5]:
             st.session_state.current_bar = positive_comment_bars[0]
             st.rerun()
 
-# =======================
-# 下方信息面板 - 注释内容
-# =======================
 
+# ---------------- 注释内容 ----------------
 st.markdown("---")
 
 if has_comment:
@@ -964,7 +933,6 @@ if has_comment:
             placeholder="在此编辑白话解释..."
         )
 
-    # 保存按钮
     st.markdown("---")
     st.markdown("#### 💾 保存操作")
     
@@ -1055,13 +1023,11 @@ else:
         </div>
         """, unsafe_allow_html=True)
 
-# =======================
-# 保存到私有仓库 - 在页面底部
-# =======================
+
+# ---------------- 保存到私有仓库 ----------------
 st.markdown("---")
 st.markdown("### 💾 保存到私有仓库")
 
-# 显示当前数据预览
 with st.expander("📊 查看要保存的数据"):
     st.json({
         "case_id": selected_case_id,
@@ -1095,7 +1061,6 @@ with col_save1:
                     st.error(message)
 
 with col_save2:
-    # 下载JSON作为备选
     json_str = save_json(st.session_state.all_data)
     st.download_button(
         "📥 下载JSON备份",
@@ -1106,22 +1071,18 @@ with col_save2:
         help="下载JSON备份"
     )
 
-# 显示修改状态和文件信息
 col_info1, col_info2, col_info3 = st.columns(3)
 with col_info1:
     if st.session_state.all_data_modified:
         st.info("💡 数据已修改，请点击 '💾 保存到私有仓库' 保存")
     else:
         st.success("✅ 数据已保存")
-        
 with col_info2:
     data_repo = get_data_repo_config()
     st.caption(f"📁 文件: {data_repo['path']}")
-    
 with col_info3:
     st.caption(f"📂 分支: {data_repo['branch']}")
 
-# 显示当前注释内容
 st.markdown("---")
 st.markdown("### 📝 当前K线注释")
 st.json({
@@ -1129,3 +1090,24 @@ st.json({
     "translation": comments.get(bar_str, {}).get("translation", ""),
     "plain": comments.get(bar_str, {}).get("plain", "")
 })
+```
+
+---
+
+## JSON 数据格式说明
+
+您的 `cases_database.json` 中，每个案例可以增加一个 `image_url` 字段：
+
+```json
+{
+  "cases": [
+    {
+      "case_id": "1",
+      "title": "案例1",
+      "date": "2024-01-01",
+      "image_url": "https://raw.githubusercontent.com/xiaobingwudi/private-data/main/images/case1.png",
+      "bars": [...],
+      "comments": {...}
+    }
+  ]
+}
