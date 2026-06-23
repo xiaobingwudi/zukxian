@@ -278,7 +278,6 @@ def load_image_from_private_repo(case_id):
     if not config["owner"] or not config["repo"]:
         return None, "数据仓库配置不完整"
     
-    # 尝试多种图片格式
     extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
     for ext in extensions:
         image_path = f"images/{case_id}{ext}"
@@ -614,8 +613,7 @@ with st.sidebar:
         
         if st.session_state.get("show_image", False) and st.session_state.image_data:
             with st.popover("🖼️ 原图", use_container_width=False):
-                import base64 as b64
-                img_b64 = b64.b64encode(st.session_state.image_data).decode()
+                img_b64 = base64.b64encode(st.session_state.image_data).decode()
                 st.markdown(f'<div class="image-popover"><img src="data:image/jpeg;base64,{img_b64}" /></div>', unsafe_allow_html=True)
                 if st.button("关闭", use_container_width=True):
                     st.session_state.show_image = False
@@ -1013,7 +1011,8 @@ if has_comment:
                             break
                     
                     st.session_state.all_data_modified = True
-                    st.session_state[f"trans_edit_{bar_str}"] = result
+                    # 修复：使用 update 方法安全设置 session_state
+                    st.session_state[f"trans_result_{bar_str}"] = result
                     st.session_state.save_message = "✅ AI翻译完成"
                     st.rerun()
             else:
@@ -1034,11 +1033,19 @@ if has_comment:
                             break
                     
                     st.session_state.all_data_modified = True
-                    st.session_state[f"plain_edit_{bar_str}"] = result
+                    # 修复：使用 update 方法安全设置 session_state
+                    st.session_state[f"plain_result_{bar_str}"] = result
                     st.session_state.save_message = "✅ AI白话完成"
                     st.rerun()
             else:
                 st.warning("没有原文可改写")
+    
+    # 显示AI翻译结果（如果有）
+    if st.session_state.get(f"trans_result_{bar_str}"):
+        st.markdown(f'<div class="comment-box" style="border-left-color: #17a2b8;">🤖 <b>AI翻译结果:</b> {st.session_state.get(f"trans_result_{bar_str}")}</div>', unsafe_allow_html=True)
+    
+    if st.session_state.get(f"plain_result_{bar_str}"):
+        st.markdown(f'<div class="comment-box" style="border-left-color: #17a2b8;">🤖 <b>AI白话结果:</b> {st.session_state.get(f"plain_result_{bar_str}")}</div>', unsafe_allow_html=True)
 
 else:
     current_row = bars_df[bars_df["bar"] == st.session_state.current_bar]
