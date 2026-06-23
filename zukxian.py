@@ -1,6 +1,7 @@
+
 # Al Brooks AI Study Tool (single-file Streamlit version)
 # 支持从私有仓库加载数据，主程序公开
-# 原图功能：左侧边栏独立按钮，浮窗显示
+# 原图功能：自动匹配 private-data/images/{case_id}.jpg
 
 import json
 import os
@@ -130,6 +131,32 @@ def github_read_file(owner, repo, path, token, branch="main"):
         return False, None, None, f"错误: {str(e)}"
 
 
+def github_read_image(owner, repo, path, token, branch="main"):
+    """读取图片文件（返回二进制数据）"""
+    try:
+        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        params = {"ref": branch} if branch else {}
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            content = base64.b64decode(data["content"])
+            return True, content, "读取成功"
+        elif response.status_code == 401:
+            return False, None, "Token无效或已过期"
+        elif response.status_code == 403:
+            return False, None, "Token权限不足，需要repo权限"
+        elif response.status_code == 404:
+            return False, None, "图片不存在"
+        else:
+            return False, None, f"读取失败: {response.status_code}"
+    except Exception as e:
+        return False, None, f"错误: {str(e)}"
+
+
 def github_write_file(owner, repo, path, content, token, commit_message=None, branch="main", sha=None):
     if not token:
         return False, "❌ 请提供GitHub Token"
@@ -193,9 +220,8 @@ def load_case_by_id(cases, case_id):
         if str(case.get("case_id", "")) == str(case_id):
             bars = pd.DataFrame(case.get("bars", []))
             comments = case.get("comments", {})
-            image_url = case.get("image_url", "")
-            return case, bars, comments, image_url
-    return None, None, None, None
+            return case, bars, comments
+    return None, None, None
 
 
 def save_json(data):
@@ -242,6 +268,30 @@ def save_to_private_repo(data, commit_message=None):
         commit_message or f"更新数据 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         config["branch"]
     )
+
+
+def load_image_from_private_repo(case_id):
+    """根据case_id从私有仓库的images目录加载图片"""
+    config = get_data_repo_config()
+    if not config["token"]:
+        return None, "GitHub Token未配置"
+    if not config["owner"] or not config["repo"]:
+        return None, "数据仓库配置不完整"
+    
+    # 尝试多种图片格式
+    extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+    for ext in extensions:
+        image_path = f"images/{case_id}{ext}"
+        success, content, message = github_read_image(
+            config["owner"],
+            config["repo"],
+            image_path,
+            config["token"],
+            config["branch"]
+        )
+        if success:
+            return content, f"✅ 图片加载成功 ({ext})"
+    return None, "❌ 未找到图片"
 
 
 # --------------------- UI 界面模块 ---------------------
@@ -448,8 +498,10 @@ if "save_message" not in st.session_state:
     st.session_state.save_message = ""
 if "github_file_sha" not in st.session_state:
     st.session_state.github_file_sha = None
-if "current_image_url" not in st.session_state:
-    st.session_state.current_image_url = ""
+if "show_image" not in st.session_state:
+    st.session_state.show_image = False
+if "image_data" not in st.session_state:
+    st.session_state.image_data = None
 
 
 # ---------------- 侧边栏 ----------------
@@ -548,39 +600,29 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### 🖼️ 原图查看")
-    if st.session_state.current_image_url:
+    if st.session_state.current_case_id:
         if st.button("📷 显示原图", use_container_width=True, type="primary"):
-            st.session_state.show_image = True
-            st.rerun()
-        # 浮窗显示图片
-        if st.session_state.get("show_image", False):
-            with st.popover("🖼️ 原图", use_container_width=False):
-                img_url = st.session_state.current_image_url
-                # 如果是GitHub私有仓库图片，通过token代理
-                if "github.com" in img_url and "/raw/" in img_url:
-                    try:
-                        token = get_github_config()["token"]
-                        headers = {"Authorization": f"token {token}"}
-                        response = requests.get(img_url, headers=headers)
-                        if response.status_code == 200:
-                            # 直接显示图片（使用base64编码）
-                            import base64 as b64
-                            img_data = b64.b64encode(response.content).decode()
-                            st.markdown(f'<div class="image-popover"><img src="data:image/png;base64,{img_data}" /></div>', unsafe_allow_html=True)
-                        else:
-                            st.error(f"❌ 加载图片失败: {response.status_code}")
-                    except Exception as e:
-                        st.error(f"❌ 加载图片失败: {str(e)}")
+            with st.spinner("正在加载图片..."):
+                img_data, msg = load_image_from_private_repo(st.session_state.current_case_id)
+                if img_data:
+                    st.session_state.image_data = img_data
+                    st.session_state.show_image = True
+                    st.success("✅ 图片加载成功")
                 else:
-                    # 公开图片直接显示
-                    st.markdown(f'<div class="image-popover"><img src="{img_url}" /></div>', unsafe_allow_html=True)
-                
-                # 关闭按钮
+                    st.error(msg)
+            st.rerun()
+        
+        if st.session_state.get("show_image", False) and st.session_state.image_data:
+            with st.popover("🖼️ 原图", use_container_width=False):
+                import base64 as b64
+                img_b64 = b64.b64encode(st.session_state.image_data).decode()
+                st.markdown(f'<div class="image-popover"><img src="data:image/jpeg;base64,{img_b64}" /></div>', unsafe_allow_html=True)
                 if st.button("关闭", use_container_width=True):
                     st.session_state.show_image = False
+                    st.session_state.image_data = None
                     st.rerun()
     else:
-        st.info("当前案例没有关联图片")
+        st.info("请先加载数据")
 
 
 # ---------------- 数据加载检查 ----------------
@@ -609,7 +651,8 @@ if all_data is None or all_cases is None or not all_cases:
         ### 创建私有数据仓库
         1. 在GitHub创建新仓库，设置为 **Private**
         2. 上传 `cases_database.json` 文件
-        3. 在Secrets中配置仓库信息
+        3. 在 `images/` 目录下存放图片，文件名格式为 `{case_id}.jpg`
+        4. 在Secrets中配置仓库信息
         """)
     with st.expander("🔧 当前配置状态"):
         data_repo = get_data_repo_config()
@@ -639,12 +682,10 @@ selected_case_id = st.sidebar.selectbox(
 )
 st.session_state.current_case_id = selected_case_id
 
-case, bars_df, comments, image_url = load_case_by_id(all_cases, selected_case_id)
+case, bars_df, comments = load_case_by_id(all_cases, selected_case_id)
 if case is None:
     st.error(f"未找到案例 ID: {selected_case_id}")
     st.stop()
-
-st.session_state.current_image_url = image_url or ""
 
 if 0 in bars_df["bar"].values:
     bar_zero = bars_df[bars_df["bar"] == 0]
@@ -1090,22 +1131,3 @@ st.json({
     "translation": comments.get(bar_str, {}).get("translation", ""),
     "plain": comments.get(bar_str, {}).get("plain", "")
 })
-
-
-
-
-## JSON 数据格式说明您的 `cases_database.json` 中，每个案例可以增加一个 `image_url` 字段：
-
-
-{
-  "cases": [
-    {
-      "case_id": "1",
-      "title": "案例1",
-      "date": "2024-01-01",
-      "image_url": "https://raw.githubusercontent.com/xiaobingwudi/private-data/main/images/case1.png",
-      "bars": [...],
-      "comments": {...}
-    }
-  ]
-}
